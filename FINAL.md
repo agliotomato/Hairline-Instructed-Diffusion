@@ -1,4 +1,4 @@
-# Hairline Conditioned Diffusion v2 – Final Report
+# Hairline Conditioned Diffusion
 
 ## 1. 프로젝트 개요와 목적
 - **목표**: 의사가 설계한 머리선(hairline mask)에 맞춰 대머리 이미지를 자연스러운 머리 이미지로 복원하는 조건부 Stable Diffusion 모델을 구축한다.
