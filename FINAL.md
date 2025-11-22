@@ -85,6 +85,7 @@ M : only_forehead_line /
   - 토크나이저 복제본, 로그 디렉터리.
  
   - https://drive.google.com/drive/folders/15F-x6RTybvYIswIW6bIP4oSv-ixQBzrv
+  - 1차 학습본. 추후에 cross-attention 적용 된 산출물 업데이트 예정
 
 ## 8. 추론 파이프라인 (infer_hairline_cond_v2.py)
 | 구성 요소 | 설명 |
