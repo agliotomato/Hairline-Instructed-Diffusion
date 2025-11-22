@@ -100,19 +100,21 @@ def main():
     )
 
     if args.model_dir:
-        # Load the fine-tuned weights with the expected 5-channel conv_in (z + mask)
+        # Fine-tuned UNet already includes the extra mask channel; just load with the right shape.
         unet = UNet2DConditionModel.from_pretrained(
             args.model_dir,
             in_channels=5,
             low_cpu_mem_usage=False,
         )
+        # Ensure metadata reflects the conditioning setup for downstream checks.
+        unet.config.base_in_channels = 4
+        unet.config.hair_conditioning_channels = 1
     else:
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path,
             subfolder="unet",
-            in_channels=5,
         )
-    unet = enable_hairline_conditioning(unet, mask_channels=1)
+        unet = enable_hairline_conditioning(unet, mask_channels=1)
     unet.to(device, dtype=weight_dtype)
 
     noise_scheduler = DDIMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
@@ -141,7 +143,7 @@ def main():
     init_timestep = min(max(1, int(len(timesteps) * strength)), len(timesteps))
     t_start = max(len(timesteps) - init_timestep, 0)
     timesteps = timesteps[t_start:]
-    noise = torch.randn_like(latents, generator=generator)
+    noise = torch.randn(latents.shape, device=latents.device, dtype=latents.dtype, generator=generator)
     if t_start > 0:
         latents = noise_scheduler.add_noise(latents, noise, timesteps[0])
     else:
