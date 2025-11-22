@@ -15,10 +15,10 @@
 
 https://github.com/agliotomato/Hairline-Instructed-Diffusion/tree/main/data
 
-I_orig : original_images
-I_bald : bald_images
-M : only_forehead_line
-사용.
+I_orig : original_images / 
+I_bald : bald_images / 
+M : only_forehead_line /
+ 사용.
 
 - 해상도는 기본 512×512이며, `HairlineDatasetV2`가 PIL 이미지를 로드해 정규화 후 Tensor로 반환한다.
 - 마스크는 학습 시 UNet 입력용으로 64×64까지 다운샘플링되고, conditioner 토큰 생성에도 재사용된다.
