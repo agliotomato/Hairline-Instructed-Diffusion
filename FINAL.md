@@ -28,21 +28,21 @@
 
 ## 4. Stable Diffusion v1.5 대비 변경점
 - **UNet 입력 채널 확장**  
-  - *무엇을*: 기본 4채널(latent) → 5채널(latent + mask)로 변경.  
-  - *왜*: 공간적 hairline 정보를 직접 UNet에 주입해 생성된 머리카락이 의사의 마스크를 정확히 따르게 만들기 위함.  
-  - *어떻게*: `enable_hairline_conditioning`이 UNet의 `in_channels`를 5로 재구성하고, 추론 시에도 동일하게 `torch.cat([latent, mask], dim=1)` 구조를 사용(`train_hairline_cond_v2.py:111`, `infer_hairline_cond_v2.py:141`).
+  - 기본 4채널(latent) → 5채널(latent + mask)로 변경.  
+  - 공간적 hairline 정보를 직접 UNet에 주입해 생성된 머리카락이 의사의 마스크를 정확히 따르게 만들기 위함.  
+  - `enable_hairline_conditioning`이 UNet의 `in_channels`를 5로 재구성하고, 추론 시에도 동일하게 `torch.cat([latent, mask], dim=1)` 구조를 사용(`train_hairline_cond_v2.py:111`, `infer_hairline_cond_v2.py:141`).
 - **Cross-Attention 토큰 커스터마이즈**  
-  - *무엇을*: CLIP 텍스트 토큰 앞에 `mask_token`과 (옵션) `bald_token`을 삽입.  
-  - *왜*: 텍스트만으로는 머리선 제약이 불완전하므로, 마스크/대머리 latent를 전역 스타일 조건으로 병합해 geometric & photometric 일관성을 확보.  
-  - *어떻게*: `HairlineConditioningEmbeddings`가 풀링된 마스크/대머리 latent를 선형층에 통과시켜 cond 토큰을 만들고, 학습·추론 둘 다 `torch.cat([cond_tokens, text_tokens], dim=1)`로 전달.  
+  - CLIP 텍스트 토큰 앞에 `mask_token`과 (옵션) `bald_token`을 삽입.  
+  - 텍스트만으로는 머리선 제약이 불완전하므로, 마스크/대머리 latent를 전역 스타일 조건으로 병합해 geometric & photometric 일관성을 확보.  
+  - `HairlineConditioningEmbeddings`가 풀링된 마스크/대머리 latent를 선형층에 통과시켜 cond 토큰을 만들고, 학습·추론 둘 다 `torch.cat([cond_tokens, text_tokens], dim=1)`로 전달.  
 - **학습 목표 변경**  
-  - *무엇을*: 일반 SD는 텍스트만 조건으로 삼지만, 본 모델은 `(mask, bald latent)`를 조건으로 두고 target `x₀`는 항상 `z_orig`.  
-  - *왜*: 대머리 이미지를 target으로 학습하면 hairline 편집이 불가능하기 때문에, 원본 머리 latent를 복원해야 원하는 헤어스타일을 얻을 수 있음.  
-  - *어떻게*: 학습 루프에서 `vae.encode(orig)`로 얻은 latent에 노이즈를 주입하고, `vae.encode(bald)`는 conditioner에만 공급(`train_hairline_cond_v2.py:94-150`).
+  - 일반 SD는 텍스트만 조건으로 삼지만, 본 모델은 `(mask, bald latent)`를 조건으로 두고 target `x₀`는 항상 `z_orig`.  
+  - 대머리 이미지를 target으로 학습하면 hairline 편집이 불가능하기 때문에, 원본 머리 latent를 복원해야 원하는 헤어스타일을 얻을 수 있음.  
+  - 학습 루프에서 `vae.encode(orig)`로 얻은 latent에 노이즈를 주입하고, `vae.encode(bald)`는 conditioner에만 공급(`train_hairline_cond_v2.py:94-150`).
 - **추론 파이프라인 개선**  
-  - *무엇을*: DDIM 기반 샘플러로 사용자 제공 마스크를 그대로 사용하고, classifier-free guidance를 지원.  
-  - *왜*: 빠른 생성과 프롬프트 기반 제어를 동시에 만족시키고, 마스크를 1:1 반영하기 위함.  
-  - *어떻게*: `infer_hairline_cond_v2.py`가 `DDIMScheduler`, guidance 스케일, 반복된 마스크 latent, conditioner 토큰을 구성해 한 번에 처리.
+  - DDIM 기반 샘플러로 사용자 제공 마스크를 그대로 사용하고, classifier-free guidance를 지원.  
+  - 빠른 생성과 프롬프트 기반 제어를 동시에 만족시키고, 마스크를 1:1 반영하기 위함.  
+  - `infer_hairline_cond_v2.py`가 `DDIMScheduler`, guidance 스케일, 반복된 마스크 latent, conditioner 토큰을 구성해 한 번에 처리.
 
 ## 5. 입력/출력 및 조건 결합 구조
 | 단계 | 입력 | 처리 | 출력 |
