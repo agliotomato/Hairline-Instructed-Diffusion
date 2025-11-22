@@ -13,6 +13,8 @@
 | 헤어라인 마스크 `M` | 이마 구역 1채널 마스크 | `--mask_dir` |
 | 텍스트 메타데이터 | 선택적 프롬프트(`prompt`) | `--metadata_path`, `--metadata_text_key` |
 
+https://github.com/agliotomato/Hairline-Instructed-Diffusion/tree/main/data
+
 - 해상도는 기본 512×512이며, `HairlineDatasetV2`가 PIL 이미지를 로드해 정규화 후 Tensor로 반환한다.
 - 마스크는 학습 시 UNet 입력용으로 64×64까지 다운샘플링되고, conditioner 토큰 생성에도 재사용된다.
 
