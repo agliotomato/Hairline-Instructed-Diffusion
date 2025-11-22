@@ -83,6 +83,8 @@ M : only_forehead_line /
   - `output_dir/unet/` : 미세조정된 UNet 가중치.
   - `output_dir/conditioner.pt` : conditioner state dict 및 메타데이터(`hidden_size`, `use_bald_token`).
   - 토크나이저 복제본, 로그 디렉터리.
+ 
+  - https://drive.google.com/drive/folders/15F-x6RTybvYIswIW6bIP4oSv-ixQBzrv
 
 ## 8. 추론 파이프라인 (infer_hairline_cond_v2.py)
 | 구성 요소 | 설명 |
