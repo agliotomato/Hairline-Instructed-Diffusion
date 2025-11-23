@@ -35,10 +35,10 @@ def encode_texts(
     tokenizer: AutoTokenizer,
     text_encoder: CLIPTextModel,
     prompt: str,
-    negative_prompt: str,
+    negative_prompt: str | None,
     device: torch.device,
     num_images: int,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor | None]:
     text_inputs = tokenizer(
         [prompt],
         padding="max_length",
@@ -48,14 +48,16 @@ def encode_texts(
     ).to(device)
     text_embeddings = text_encoder(text_inputs.input_ids)[0].repeat(num_images, 1, 1)
 
-    uncond_inputs = tokenizer(
-        [negative_prompt],
-        padding="max_length",
-        truncation=True,
-        max_length=tokenizer.model_max_length,
-        return_tensors="pt",
-    ).to(device)
-    uncond_embeddings = text_encoder(uncond_inputs.input_ids)[0].repeat(num_images, 1, 1)
+    uncond_embeddings = None
+    if negative_prompt is not None:
+        uncond_inputs = tokenizer(
+            [negative_prompt],
+            padding="max_length",
+            truncation=True,
+            max_length=tokenizer.model_max_length,
+            return_tensors="pt",
+        ).to(device)
+        uncond_embeddings = text_encoder(uncond_inputs.input_ids)[0].repeat(num_images, 1, 1)
 
     return text_embeddings, uncond_embeddings
 
@@ -86,7 +88,7 @@ def main():
     parser.add_argument("--prompt", type=str, default="")
     parser.add_argument("--negative_prompt", type=str, default="")
     parser.add_argument("--num_inference_steps", type=int, default=30)
-    parser.add_argument("--guidance_scale", type=float, default=7.5)
+    parser.add_argument("--guidance_scale", type=float, default=1.0)
     parser.add_argument("--num_samples", type=int, default=1)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--out_dir", type=str, required=True)
@@ -158,17 +160,24 @@ def main():
     )
     latents = latents * noise_scheduler.init_noise_sigma
 
+    use_guidance = args.guidance_scale > 1.0
+
     text_embeddings, uncond_embeddings = encode_texts(
-        tokenizer, text_encoder, args.prompt, args.negative_prompt, device, args.num_samples
+        tokenizer,
+        text_encoder,
+        args.prompt,
+        args.negative_prompt if use_guidance else None,
+        device,
+        args.num_samples,
     )
     text_embeddings = text_embeddings.to(dtype=weight_dtype)
-    uncond_embeddings = uncond_embeddings.to(dtype=weight_dtype)
+    if uncond_embeddings is not None:
+        uncond_embeddings = uncond_embeddings.to(dtype=weight_dtype)
 
     cond_tokens = conditioner(mask_latent, z_bald)
     cond_states = torch.cat([cond_tokens, text_embeddings], dim=1)
 
-    guidance = args.guidance_scale > 1.0
-    if guidance:
+    if use_guidance:
         uncond_states = torch.cat([cond_tokens, uncond_embeddings], dim=1)
         encoder_hidden_states = torch.cat([uncond_states, cond_states], dim=0)
     else:
@@ -181,7 +190,7 @@ def main():
             ):
                 latent_model_input = latents
                 mask_input = mask_latent
-                if guidance:
+                if use_guidance:
                     latent_model_input = torch.cat([latent_model_input, latent_model_input])
                     mask_input = torch.cat([mask_input, mask_input])
 
@@ -191,7 +200,7 @@ def main():
                     encoder_hidden_states=encoder_hidden_states,
                 ).sample
 
-                if guidance:
+                if use_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
