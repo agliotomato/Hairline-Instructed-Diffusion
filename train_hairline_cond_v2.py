@@ -91,6 +91,7 @@ def main():
         os.makedirs(args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
 
+    # NOTE: Lambda 서버에서는 TensorBoard/TF/JAX 충돌이 나기 때문에 init_trackers를 비활성화해야 함.
     if accelerator.is_main_process and args.report_to.lower() != "none":
         accelerator.init_trackers("hairline_cond_v2", config=vars(args))
 
