@@ -175,23 +175,27 @@ def main():
         encoder_hidden_states = cond_states
 
     for t in noise_scheduler.timesteps:
-        latent_model_input = latents
-        mask_input = mask_latent
-        if guidance:
-            latent_model_input = torch.cat([latent_model_input, latent_model_input])
-            mask_input = torch.cat([mask_input, mask_input])
+        with torch.no_grad():
+            with torch.autocast(
+                device_type="cuda", dtype=weight_dtype, enabled=device.type == "cuda"
+            ):
+                latent_model_input = latents
+                mask_input = mask_latent
+                if guidance:
+                    latent_model_input = torch.cat([latent_model_input, latent_model_input])
+                    mask_input = torch.cat([mask_input, mask_input])
 
-        noise_pred = unet(
-            torch.cat([latent_model_input, mask_input], dim=1),
-            t,
-            encoder_hidden_states=encoder_hidden_states,
-        ).sample
+                noise_pred = unet(
+                    torch.cat([latent_model_input, mask_input], dim=1),
+                    t,
+                    encoder_hidden_states=encoder_hidden_states,
+                ).sample
 
-        if guidance:
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                if guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-        latents = noise_scheduler.step(noise_pred, t, latents).prev_sample
+                latents = noise_scheduler.step(noise_pred, t, latents).prev_sample
 
     latents = latents / vae.config.scaling_factor
     with torch.no_grad():
