@@ -1,4 +1,4 @@
-# Hairline Conditioned Diffusion v2 – Final Report
+# Hairline Conditioned Diffusion
 
 ## 1. 프로젝트 개요와 목적
 - **목표**: 의사가 설계한 머리선(hairline mask)에 맞춰 대머리 이미지를 자연스러운 머리 이미지로 복원하는 조건부 Stable Diffusion 모델을 구축한다.
@@ -12,6 +12,13 @@
 | 조건 이미지 `I_bald` | 정렬된 대머리 얼굴 (조건) | `--bald_dir` |
 | 헤어라인 마스크 `M` | 이마 구역 1채널 마스크 | `--mask_dir` |
 | 텍스트 메타데이터 | 선택적 프롬프트(`prompt`) | `--metadata_path`, `--metadata_text_key` |
+
+https://github.com/agliotomato/Hairline-Instructed-Diffusion/tree/main/data
+
+I_orig : original_images / 
+I_bald : bald_images / 
+M : only_forehead_line /
+ 사용.
 
 - 해상도는 기본 512×512이며, `HairlineDatasetV2`가 PIL 이미지를 로드해 정규화 후 Tensor로 반환한다.
 - 마스크는 학습 시 UNet 입력용으로 64×64까지 다운샘플링되고, conditioner 토큰 생성에도 재사용된다.
@@ -76,6 +83,9 @@
   - `output_dir/unet/` : 미세조정된 UNet 가중치.
   - `output_dir/conditioner.pt` : conditioner state dict 및 메타데이터(`hidden_size`, `use_bald_token`).
   - 토크나이저 복제본, 로그 디렉터리.
+ 
+  - https://drive.google.com/drive/folders/15F-x6RTybvYIswIW6bIP4oSv-ixQBzrv
+  - 1차 학습본. 추후에 cross-attention 적용 된 산출물 업데이트 예정
 
 ## 8. 추론 파이프라인 (infer_hairline_cond_v2.py)
 | 구성 요소 | 설명 |
