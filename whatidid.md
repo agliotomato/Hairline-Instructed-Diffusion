@@ -321,4 +321,61 @@ extract_forehead_hairline.py
   <img src="data/only_forehead_line/01057.png" width="22%" />
 </p>
 
+### train
+> python3 train_hairline_cond.py \
+>     --pretrained_model_name_or_path runwayml/stable-diffusion-v1-5 \
+>     --bald_dir data/bald_images \
+>     --mask_dir data/only_forehead_line \
+>     --output_dir runs/hairline_cond \
+>     --train_batch_size 2 \
+>     --num_train_epochs 10 \
+>     --mixed_precision fp16
+
+
+train_hairline_cond.py
+
+- 이 스크립트의 목적
+    - train_hairline_cond.py는 기존 Stable Diffusion 파이프라인에 hairline 마스크를 조건으로 주는 전용 학습 엔트리 포이트이며, 대머리 이미지를 hairline 밴드 정보와 함께 주었을 대 그 구조를 따르는 헤어 복원을 가능하게 하기 위해 작성되었다. 
+
+    - 이를 위해 Stable Diffusion v1-5의 UNet 채널 latent + 1채널 hairline 마스크를 입력받는 구조로 확장하고 (utils/hair_mask_utils.py), 해당 구조르르 학습시키는 역할만을 담당하도록 다른 구성요소는 고정한다.
+
+- 무엇을 학습하는 가
+    - 학습 대상은 hairline 마스크가 추가된 조건부 UNet이며, CLIP text encoder와 VAE는 freeze 되어 손실계산에만 쓰인다.
+
+    - 목적함수는 표준 DDPM 노이즈 예측 MSE로, 마스크가 주어졌을 때 노이즈를 얼마나 잘 예측하는 지에 맞추어 UNet 파라미터를 업데이트 한다.
+
+- 데이터 준비와 입력 궝
+
+    - HairlineDataset이 대머지 이미지와 대응되는 1채널 이마선 마스크, 그리고 선택적 텍스트 프롬프트 메타데이터를 로드해 정규화된 텐서로 반환한다.
+    - Dataloader는 위 데이터셋에서 RGB 이미지를 [-1,1]로 정규화하고 마스크는 [0,1]로 clamp 한 뒤 배치로 묶는다
+
+- 학습 절차
+    - 1단계
+        - VAE로 대머리 머리를 latent로 인코딩
+        - DDPM scheduler로 무작위 노이즈와 timestep을 샘플링해 latent에 섞고
+        - hairline 마스크를 latent 해상도로 보간하여 함께 UNet에 전달한다
+    - 2단계
+        - 텍스트 조건이 있으면 tokenizer/CLIP encoder로 임베딩을 얻어 cross-attention conditioning으로 넣고
+        - 그 결과 예측 노이즈와 정답 노이즈 사이의 MSE를 계산해 back-propagation 한다
+
+- 산출물. 
+    - 학습이 끝나면 수정된 UNet 가중치를 runs/unet에 Diffusers 포맷으로 저장하고, 토크나이저도 함께 보존하여 추론 스크립트에서 바로 사용할 ㅅ ㅜ있도록 한다. 
+    - 이 산출물을 infer_hairline_cond.py에 전달하면 동일한 hairline 마스크 조건으로 실제 헤어 이미지를 생성할 수 있다. 
+
+
+
+### trainv2
+python3 train_hairline_cond_v2.py \
+    --pretrained_model_name_or_path runwayml/stable-diffusion-v1-5 \
+    --orig_dir data/original_images \
+    --bald_dir data/bald_images \
+    --mask_dir data/only_forehead_line \
+    --output_dir runs/hairline_cond_v2_nomask \
+    --train_batch_size 2 \
+    --num_train_epochs 10 \
+    --learning_rate 1e-5 \
+    --checkpointing_steps 1000 \
+    --mixed_precision fp16 \
+    --dataloader_num_workers 0
+
 
