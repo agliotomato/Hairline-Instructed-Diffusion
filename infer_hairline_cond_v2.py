@@ -176,33 +176,34 @@ def main():
 
     cond_tokens = conditioner(mask_latent, z_bald)
     cond_states = torch.cat([cond_tokens, text_embeddings], dim=1)
-
+    uncond_states = None
     if use_guidance:
         uncond_states = torch.cat([cond_tokens, uncond_embeddings], dim=1)
-        encoder_hidden_states = torch.cat([uncond_states, cond_states], dim=0)
-    else:
-        encoder_hidden_states = cond_states
 
     for t in noise_scheduler.timesteps:
         with torch.no_grad():
             with torch.autocast(
                 device_type="cuda", dtype=weight_dtype, enabled=device.type == "cuda"
             ):
-                latent_model_input = latents
-                mask_input = mask_latent
+                model_input = torch.cat([latents, mask_latent], dim=1)
                 if use_guidance:
-                    latent_model_input = torch.cat([latent_model_input, latent_model_input])
-                    mask_input = torch.cat([mask_input, mask_input])
-
-                noise_pred = unet(
-                    torch.cat([latent_model_input, mask_input], dim=1),
-                    t,
-                    encoder_hidden_states=encoder_hidden_states,
-                ).sample
-
-                if use_guidance:
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred_uncond = unet(
+                        model_input,
+                        t,
+                        encoder_hidden_states=uncond_states,
+                    ).sample
+                    noise_pred_text = unet(
+                        model_input,
+                        t,
+                        encoder_hidden_states=cond_states,
+                    ).sample
                     noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                else:
+                    noise_pred = unet(
+                        model_input,
+                        t,
+                        encoder_hidden_states=cond_states,
+                    ).sample
 
                 latents = noise_scheduler.step(noise_pred, t, latents).prev_sample
 
