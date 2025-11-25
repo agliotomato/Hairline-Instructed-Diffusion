@@ -70,11 +70,12 @@ def load_conditioner(
     if path and path.exists():
         state = torch.load(path, map_location="cpu")
         hidden_size = state.get("hidden_size", hidden_size)
-        use_bald_token = state.get("use_bald_token", True)
+        if state.get("use_bald_token", True) is False:
+            print("conditioner checkpoint had use_bald_token=False, overriding to True for inference.")
 
     conditioner = HairlineConditioningEmbeddings(hidden_size=hidden_size, use_bald_token=use_bald_token)
     if state:
-        conditioner.load_state_dict(state["state_dict"])
+        conditioner.load_state_dict(state["state_dict"], strict=False)
     return conditioner.to(device=device, dtype=dtype)
 
 
@@ -95,6 +96,8 @@ def main():
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--dtype", type=str, choices=["fp32", "fp16", "bf16"], default="fp16")
     parser.add_argument("--resolution", type=int, default=512)
+    parser.add_argument("--init_latent", type=str, choices=["noise", "zbald"], default="noise")
+    parser.add_argument("--noise_strength", type=float, default=1.0)
     args = parser.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -155,10 +158,69 @@ def main():
     mask_latent = F.interpolate(mask_tensor, size=(64, 64), mode="bilinear", align_corners=False)
     mask_latent = mask_latent.repeat(args.num_samples, 1, 1, 1).to(device=device, dtype=weight_dtype)
 
-    latents = torch.randn(
-        (args.num_samples, 4, 64, 64), device=device, dtype=weight_dtype, generator=generator
+    if args.init_latent == "noise":
+        latents = torch.randn(
+            (args.num_samples, 4, 64, 64), device=device, dtype=weight_dtype, generator=generator
+        )
+        latents = latents * noise_scheduler.init_noise_sigma
+    elif args.init_latent == "zbald":
+        noise = torch.randn_like(z_bald, generator=generator)
+        noise = noise * noise_scheduler.init_noise_sigma
+        latents = z_bald + args.noise_strength * noise  # identity-preserving init: start near z_bald
+    else:
+        raise ValueError(f"Unsupported init_latent option: {args.init_latent}")
+
+    use_guidance = args.guidance_scale > 1.0
+
+    text_embeddings, uncond_embeddings = encode_texts(
+        tokenizer,
+        text_encoder,
+        args.prompt,
+        args.negative_prompt if use_guidance else None,
+        device,
+        args.num_samples,
     )
-    latents = latents * noise_scheduler.init_noise_sigma
+    text_embeddings = text_embeddings.to(dtype=weight_dtype)
+    if uncond_embeddings is not None:
+        uncond_embeddings = uncond_embeddings.to(dtype=weight_dtype)
+
+    cond_tokens = conditioner(mask_latent, z_bald)
+    cond_states = torch.cat([cond_tokens, text_embeddings], dim=1)
+    uncond_states = None
+    if use_guidance:
+        uncond_states = torch.cat([cond_tokens, uncond_embeddings], dim=1)
+
+    for t in noise_scheduler.timesteps:
+        with torch.no_grad():
+            with torch.autocast(
+                device_type="cuda", dtype=weight_dtype, enabled=device.type == "cuda"
+            ):
+                model_input = torch.cat([latents, mask_latent], dim=1)
+                if use_guidance:
+                    noise_pred_uncond = unet(
+                        model_input,
+                        t,
+                        encoder_hidden_states=uncond_states,
+                    ).sample
+                    noise_pred_text = unet(
+                        model_input,
+                        t,
+                        encoder_hidden_states=cond_states,
+                    ).sample
+                    noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                else:
+                    noise_pred = unet(
+                        model_input,
+                        t,
+                        encoder_hidden_states=cond_states,
+                    ).sample
+
+                latents = noise_scheduler.step(noise_pred, t, latents).prev_sample
+
+    latents = latents / vae.config.scaling_factor
+    with torch.no_grad():
+        images = vae.decode(latents).sample
+
 
     use_guidance = args.guidance_scale > 1.0
 
@@ -216,9 +278,11 @@ def main():
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     for idx in range(args.num_samples):
         img = transforms.ToPILImage()(images[idx])
-        img.save(out_dir / f"sample_{idx:03d}.png")
+        img.save(out_dir / f"sample_{timestamp}_{idx:03d}.png")
 
     print(f"Saved {args.num_samples} samples to {out_dir}")
 

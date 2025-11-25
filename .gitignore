@@ -22,3 +22,7 @@ logs/
 
 # vscode
 .vscode/
+
+result/
+hairline_cond_v3_run1/
+hairline_cond_v3_local_debug/
