@@ -123,8 +123,8 @@ def main():
     # We use Zero Initialization for the new mask channel to preserve pretrained behavior.
     
     # 1. Get existing weights
-    # Note: ControlNetModel uses 'controlnet_cond_embedding' which contains 'conv_in'
-    old_conv_weight = controlnet.controlnet_cond_embedding.conv_in.weight.data # Shape: [320, 4, 3, 3]
+    # Note: In this custom ControlNetModel, 'conv_in_2' processes the condition input.
+    old_conv_weight = controlnet.conv_in_2.weight.data # Shape: [320, 4, 3, 3]
     
     # 2. Create new 5-channel kernel
     new_conv_weight = torch.zeros((320, 5, 3, 3), device=controlnet.device)
@@ -136,10 +136,10 @@ def main():
     new_conv_weight[:, 4:, :, :] = 0.0
     
     # 5. Transplant weights
-    controlnet.controlnet_cond_embedding.conv_in.weight.data = new_conv_weight
+    controlnet.conv_in_2.weight.data = new_conv_weight
     controlnet.config.conditioning_channels = 5 # Update config
     
-    logger.info("Successfully performed Weight Surgery on Latent IdentityNet (4 -> 5 channels).")
+    logger.info("Successfully performed Weight Surgery on Latent IdentityNet (conv_in_2: 4 -> 5 channels).")
 
     # Main UNet remains pure (4 channels)
     # unet = enable_hairline_conditioning(unet, mask_channels=1) # REMOVED
