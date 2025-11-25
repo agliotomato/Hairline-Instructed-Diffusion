@@ -84,7 +84,8 @@ M : only_forehead_line /
   - `output_dir/conditioner.pt` : conditioner state dict 및 메타데이터(`hidden_size`, `use_bald_token`).
   - 토크나이저 복제본, 로그 디렉터리.
  
-  - https://drive.google.com/drive/folders/15F-x6RTybvYIswIW6bIP4oSv-ixQBzrv
+  - https://drive.google.com/drive/folders/15F-x6RTybvYIswIW6bIP4oSv-ixQBzrv\
+  - https://drive.google.com/drive/u/0/folders/1Woh8EmJwdfV-C2y2QCCrW_7hyh3zb83C
   - 1차 학습본. 추후에 cross-attention 적용 된 산출물 업데이트 예정
 
 ## 8. 추론 파이프라인 (infer_hairline_cond_v2.py)
