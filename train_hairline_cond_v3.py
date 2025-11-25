@@ -273,7 +273,7 @@ def main():
                     sample=noisy_latents,
                     timestep=timesteps,
                     encoder_hidden_states=encoder_hidden_states,
-                    encoder_hidden_states=encoder_hidden_states,
+
                     controlnet_cond=controlnet_cond,
                     return_dict=False,
                 )
