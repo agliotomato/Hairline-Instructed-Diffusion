@@ -253,7 +253,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlnetMixin):
         )
 
         self.conv_in_2 = nn.Conv2d(
-            in_channels, block_out_channels[0], kernel_size=conv_in_kernel, padding=conv_in_padding
+            conditioning_channels, block_out_channels[0], kernel_size=conv_in_kernel, padding=conv_in_padding
         )
 
         # input
