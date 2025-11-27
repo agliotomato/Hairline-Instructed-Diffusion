@@ -120,6 +120,7 @@ def main():
     if args.controlnet_path:
         controlnet = ControlNetModel.from_pretrained(
             args.controlnet_path,
+            conditioning_channels=5,
             low_cpu_mem_usage=False,
             ignore_mismatched_sizes=True
         ).to(device, dtype=weight_dtype)
