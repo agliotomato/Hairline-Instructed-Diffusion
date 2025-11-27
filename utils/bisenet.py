@@ -31,40 +31,40 @@ class AttentionRefinementModule(nn.Module):
     def __init__(self, in_chan, out_chan, *args, **kwargs):
         super(AttentionRefinementModule, self).__init__()
         self.conv = ConvBNReLU(in_chan, out_chan, ks=3, stride=1, padding=1)
-        self.conv_attn = nn.Conv2d(out_chan, out_chan, kernel_size=1, bias=False)
-        self.bn_attn = nn.BatchNorm2d(out_chan)
-        self.sigmoid_attn = nn.Sigmoid()
+        self.conv_atten = nn.Conv2d(out_chan, out_chan, kernel_size=1, bias=False)
+        self.bn_atten = nn.BatchNorm2d(out_chan)
+        self.sigmoid_atten = nn.Sigmoid()
 
     def forward(self, x):
         feat = self.conv(x)
-        attn = torch.mean(feat, dim=(2, 3), keepdim=True)
-        attn = self.conv_attn(attn)
-        attn = self.bn_attn(attn)
-        attn = self.sigmoid_attn(attn)
-        return feat * attn
+        atten = torch.mean(feat, dim=(2, 3), keepdim=True)
+        atten = self.conv_atten(atten)
+        atten = self.bn_atten(atten)
+        atten = self.sigmoid_atten(atten)
+        return feat * atten
 
 class FeatureFusionModule(nn.Module):
     def __init__(self, in_chan, out_chan, *args, **kwargs):
         super(FeatureFusionModule, self).__init__()
         self.convblk = ConvBNReLU(in_chan, out_chan, ks=1, stride=1, padding=0)
-        self.conv1 = nn.Conv2d(out_chan, out_chan, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_chan)
+        self.conv1 = nn.Conv2d(out_chan, out_chan // 4, kernel_size=1, bias=False)
+        # self.bn1 = nn.BatchNorm2d(out_chan // 4)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_chan, out_chan, kernel_size=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_chan)
+        self.conv2 = nn.Conv2d(out_chan // 4, out_chan, kernel_size=1, bias=False)
+        # self.bn2 = nn.BatchNorm2d(out_chan)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, fsp, fcp):
         fcat = torch.cat([fsp, fcp], dim=1)
         feat = self.convblk(fcat)
-        attn = torch.mean(feat, dim=(2, 3), keepdim=True)
-        attn = self.conv1(attn)
-        attn = self.bn1(attn)
-        attn = self.relu(attn)
-        attn = self.conv2(attn)
-        attn = self.bn2(attn)
-        attn = self.sigmoid(attn)
-        return feat + feat * attn
+        atten = torch.mean(feat, dim=(2, 3), keepdim=True)
+        atten = self.conv1(atten)
+        # atten = self.bn1(atten)
+        atten = self.relu(atten)
+        atten = self.conv2(atten)
+        # atten = self.bn2(atten)
+        atten = self.sigmoid(atten)
+        return feat + feat * atten
 
 class BiSeNet(nn.Module):
     def __init__(self, n_classes, *args, **kwargs):
@@ -129,6 +129,7 @@ class ContextPath(nn.Module):
     def __init__(self, *args, **kwargs):
         super(ContextPath, self).__init__()
         self.resnet = torchvision.models.resnet18(pretrained=True)
+        self.resnet.fc = nn.Identity() # Remove fully connected layer
         self.arm16 = AttentionRefinementModule(256, 128)
         self.arm32 = AttentionRefinementModule(512, 128)
         self.conv_head32 = ConvBNReLU(128, 128, ks=3, stride=1, padding=1)
@@ -160,7 +161,7 @@ class ContextPath(nn.Module):
         feat16_up = F.interpolate(feat16_sum, scale_factor=2, mode='nearest')
         feat16_up = self.conv_head16(feat16_up)
 
-        return feat16_up, feat32_up # feat8 is not used in CP output?
+        return feat8, feat16_up, feat32_up
         # Wait, FFM takes feat_sp (128) and feat_cp8?
         # In standard BiSeNet, FFM fuses SP output and CP output (usually 1/8 scale).
         # My implementation of FFM takes 256+512? No.
@@ -174,10 +175,8 @@ class BiSeNet(nn.Module):
     def __init__(self, n_classes, *args, **kwargs):
         super(BiSeNet, self).__init__()
         self.cp = ContextPath()
-        self.sp = SpatialPath()
-        # SP output: 128 channels
-        # CP output (feat16_up): 128 channels
-        self.ffm = FeatureFusionModule(128 + 128, 256) 
+        # self.sp = SpatialPath() # Removed in zllrunning implementation
+        self.ffm = FeatureFusionModule(256, 256) 
         self.conv_out = BiSeNetOutput(256, 256, n_classes)
         self.conv_out16 = BiSeNetOutput(128, 64, n_classes)
         self.conv_out32 = BiSeNetOutput(128, 64, n_classes)
@@ -185,11 +184,9 @@ class BiSeNet(nn.Module):
 
     def forward(self, x):
         H, W = x.size()[2:]
-        feat_cp8, feat_cp16 = self.cp(x) # actually returns feat16_up (1/8 scale relative to original if upsampled? No.)
-        # ResNet layer 3 is /16. Up x2 -> /8. So feat16_up is /8 scale.
-        # ResNet layer 4 is /32. Up x2 -> /16. So feat32_up is /16 scale.
+        feat_res8, feat_cp8, feat_cp16 = self.cp(x)
         
-        feat_sp = self.sp(x) # /8 scale
+        feat_sp = feat_res8 # Use resnet feature as spatial path
         
         feat_fuse = self.ffm(feat_sp, feat_cp8)
 
