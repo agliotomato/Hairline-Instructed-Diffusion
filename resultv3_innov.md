@@ -1,8 +1,14 @@
-# Stable-Hair V3 Innovation: Latent IdentityNet Weight Surgery
+# Stable-Hair V3_확장판
 
 ## 1. 핵심 전략: Weight Surgery
 
-기존의 Latent IdentityNet은 4채널 입력(대머리 이미지)만 받을 수 있었습니다. 우리는 이를 **5채널 입력(대머리 + 마스크)**으로 확장하면서도, 기존의 학습된 능력을 100% 보존하는 전략을 사용했습니다.
+기존의 Latent IdentityNet은 4채널 입력(대머리 이미지)만 받을 수 있었습니다. 이를 **5채널 입력(대머리 + 마스크)**으로 확장하면서도, 기존의 학습된 능력을 100% 보존하는 전략을 사용했습니다.
+
+| 순서 | 데이터 종류 | 채널 수 | 설명 |
+| :--- | :--- | :--- | :--- |
+| 기존 | Bald Proxy Latent | 4 | VAE가 압축한 대머리 정보 (얼굴, 배경 등 보존용) |
+| 추가 | Hairline Mask | +1 | 어디까지 머리를 심을지 알려주는 흑백 가이드 |
+| **합계** | **New Input** | **5** | **Latent IdentityNet이 받아야 할 총 입력** |
 
 ### 구현 원리
 1.  **Main UNet 보존**: Main UNet은 **순정 4채널 입력**을 그대로 유지합니다. (기존 SD 1.5 호환성 유지)
@@ -35,6 +41,18 @@ controlnet.conv_in_2.weight.data = new_conv_weight
 *   **Main UNet**: `Noisy Latent` (4채널)
 *   **IdentityNet**: `Bald Proxy` (4채널) + `Hairline Mask` (1채널) = **5채널 Condition**
 
+#### 코드 구현: 입력 데이터 준비 (Training)
+`train_hairline_cond_v3.py`에서 마스크를 Latent 크기로 리사이징하고, 대머리 Latent와 결합(Concatenation)하는 과정입니다.
+
+```python
+# Prepare ControlNet Input: Concat [Bald Proxy, Mask] (5 channels)
+# Resize mask to latent size (64x64) - Nearest Neighbor to preserve edges
+mask_latents = F.interpolate(
+    hair_masks, size=noisy_latents.shape[-2:], mode="nearest" 
+)
+controlnet_cond = torch.cat([z_bald, mask_latents], dim=1)
+```
+
 ### 학습 명령어 (Lambda AI)
 ```bash
 python3 train_hairline_cond_v3.py \
@@ -65,11 +83,30 @@ python3 train_hairline_cond_v3.py \
 
 추론 시에도 학습과 동일하게 IdentityNet에 5채널 입력을 제공해야 합니다.
 
-### 추론 스크립트 (`infer_hairline_cond_v3.py`) 업데이트 완료
-현재 스크립트는 Innovation 전략에 맞춰 다음과 같이 수정되었습니다:
-1.  **Main UNet**: 순정 4채널 입력 사용 (`enable_hairline_conditioning` 제거).
-2.  **IdentityNet 입력**: `Bald Proxy` + `Mask`를 결합하여 **5채널 Condition** 생성.
-3.  **마스크 처리**: `nearest` 모드로 리사이징하여 경계선 보존.
+### 추론 스크립트 (`infer_hairline_cond_v3.py`) 핵심 로직
+Innovation 전략에 맞춰, 추론 시에도 5채널 입력을 구성합니다.
+
+#### 코드 구현: 입력 데이터 준비 (Inference)
+`infer_hairline_cond_v3.py`에서 `z_bald`와 `mask_latent`를 결합하여 ControlNet에 전달합니다.
+
+```python
+# z_bald: VAE로 인코딩된 대머리 이미지 Latent
+# mask_latent: 64x64로 리사이징된 헤어라인 마스크
+
+# Prepare ControlNet Condition: Concat [Bald Proxy, Mask] (5 channels)
+controlnet_cond = torch.cat([z_bald, mask_latent], dim=1)
+
+# ...
+
+# Latent IdentityNet Forward
+down_block_res_samples, mid_block_res_sample = controlnet(
+    sample=latents,
+    timestep=t,
+    encoder_hidden_states=text_embeddings,
+    controlnet_cond=controlnet_cond, # 5-channel Input
+    return_dict=False,
+)
+```
 
 ### 추론 명령어 예시
 ```bash
