@@ -103,22 +103,27 @@ def main():
     if args.unet_path:
         unet = UNet2DConditionModel.from_pretrained(
             args.unet_path,
-            in_channels=5,
+            in_channels=4,
             low_cpu_mem_usage=False,
+            ignore_mismatched_sizes=True,
         )
-        unet.config.base_in_channels = 4
-        unet.config.hair_conditioning_channels = 1
     else:
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path,
             subfolder="unet",
         )
-        unet = enable_hairline_conditioning(unet, mask_channels=1)
+        # Main UNet remains pure (4 channels)
+        # unet = enable_hairline_conditioning(unet, mask_channels=1) # REMOVED
     unet.to(device, dtype=weight_dtype)
 
     # Load Latent IdentityNet (ControlNet)
     if args.controlnet_path:
-        controlnet = ControlNetModel.from_pretrained(args.controlnet_path).to(device, dtype=weight_dtype)
+        controlnet = ControlNetModel.from_pretrained(
+            args.controlnet_path,
+            conditioning_channels=5,
+            low_cpu_mem_usage=False,
+            ignore_mismatched_sizes=True
+        ).to(device, dtype=weight_dtype)
     else:
         print("Warning: No ControlNet path provided. Initializing from UNet (untrained).")
         controlnet = ControlNetModel.from_unet(unet, load_weights_from_unet=True).to(device, dtype=weight_dtype)
@@ -139,8 +144,11 @@ def main():
         z_bald = vae.encode(image_tensor).latent_dist.sample() * vae.config.scaling_factor
 
     z_bald = z_bald.repeat(args.num_samples, 1, 1, 1)
-    mask_latent = F.interpolate(mask_tensor, size=(64, 64), mode="bilinear", align_corners=False)
+    mask_latent = F.interpolate(mask_tensor, size=(64, 64), mode="nearest") # Use nearest for mask
     mask_latent = mask_latent.repeat(args.num_samples, 1, 1, 1).to(device=device, dtype=weight_dtype)
+    
+    # Prepare ControlNet Condition: Concat [Bald Proxy, Mask] (5 channels)
+    controlnet_cond = torch.cat([z_bald, mask_latent], dim=1)
 
     # Init Latents
     if args.init_latent == "noise":
@@ -174,8 +182,8 @@ def main():
             with torch.autocast(
                 device_type="cuda", dtype=weight_dtype, enabled=device.type == "cuda"
             ):
-                # Prepare Main UNet Input
-                model_input = torch.cat([latents, mask_latent], dim=1)
+                # Prepare Main UNet Input: Just Latents (4 channels)
+                model_input = latents
                 
                 # Latent IdentityNet Forward
                 # controlnet_cond = z_bald
@@ -183,7 +191,7 @@ def main():
                     sample=latents,
                     timestep=t,
                     encoder_hidden_states=text_embeddings, # Using text embeddings for ControlNet too? Stable-Hair uses it.
-                    controlnet_cond=z_bald,
+                    controlnet_cond=controlnet_cond,
                     return_dict=False,
                 )
 
@@ -200,7 +208,7 @@ def main():
                         sample=latents,
                         timestep=t,
                         encoder_hidden_states=uncond_embeddings,
-                        controlnet_cond=z_bald, # Should we drop z_bald for uncond? Usually no, we want to keep structure.
+                        controlnet_cond=controlnet_cond, # Should we drop z_bald for uncond? Usually no, we want to keep structure.
                         return_dict=False,
                     )
 

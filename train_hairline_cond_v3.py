@@ -117,8 +117,32 @@ def main():
         logger.info("Initializing Latent IdentityNet from UNet weights...")
         controlnet = ControlNetModel.from_unet(unet, load_weights_from_unet=True)
 
-    # Enable 5-channel input for Main UNet (4 latent + 1 mask)
-    unet = enable_hairline_conditioning(unet, mask_channels=1)
+    # [Innovation] Weight Surgery: Expand ControlNet input channels from 4 to 5
+    # Original: 4 channels (Bald Proxy Latent)
+    # New: 5 channels (Bald Proxy Latent + Hairline Mask)
+    # We use Zero Initialization for the new mask channel to preserve pretrained behavior.
+    
+    # 1. Get existing weights
+    # Note: In this custom ControlNetModel, 'conv_in_2' processes the condition input.
+    old_conv_weight = controlnet.conv_in_2.weight.data # Shape: [320, 4, 3, 3]
+    
+    # 2. Create new 5-channel kernel
+    new_conv_weight = torch.zeros((320, 5, 3, 3), device=controlnet.device)
+    
+    # 3. Copy existing weights (Preservation)
+    new_conv_weight[:, :4, :, :] = old_conv_weight
+    
+    # 4. Zero Initialize new channel (Gradual Learning)
+    new_conv_weight[:, 4:, :, :] = 0.0
+    
+    # 5. Transplant weights
+    controlnet.conv_in_2.weight.data = new_conv_weight
+    controlnet.config.conditioning_channels = 5 # Update config
+    
+    logger.info("Successfully performed Weight Surgery on Latent IdentityNet (conv_in_2: 4 -> 5 channels).")
+
+    # Main UNet remains pure (4 channels)
+    # unet = enable_hairline_conditioning(unet, mask_channels=1) # REMOVED
 
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
 
@@ -221,11 +245,15 @@ def main():
                 ).long()
                 noisy_latents = noise_scheduler.add_noise(z_orig, noise, timesteps)
 
-                # Prepare Main UNet Input: Concat [Noisy Latent, Mask]
+                # Prepare Main UNet Input: Just Noisy Latents (4 channels)
+                unet_inputs = noisy_latents
+
+                # Prepare ControlNet Input: Concat [Bald Proxy, Mask] (5 channels)
+                # Resize mask to latent size (64x64) - Nearest Neighbor to preserve edges? Bilinear is fine for now.
                 mask_latents = F.interpolate(
-                    hair_masks, size=noisy_latents.shape[-2:], mode="bilinear", align_corners=False
+                    hair_masks, size=noisy_latents.shape[-2:], mode="nearest" 
                 )
-                unet_inputs = torch.cat([noisy_latents, mask_latents], dim=1)
+                controlnet_cond = torch.cat([z_bald, mask_latents], dim=1)
 
                 # Prepare Text Embeddings
                 text_inputs = tokenizer(
@@ -245,7 +273,8 @@ def main():
                     sample=noisy_latents,
                     timestep=timesteps,
                     encoder_hidden_states=encoder_hidden_states,
-                    controlnet_cond=z_bald,
+
+                    controlnet_cond=controlnet_cond,
                     return_dict=False,
                 )
 
