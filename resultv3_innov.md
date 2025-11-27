@@ -116,6 +116,15 @@ python3 infer_hairline_cond_v3.py \
 <div align="center">
   <img src="data/original_images/01056.png" width="23%" />
   <img src="data/bald_images/01056.png" width="23%" />
+  <img src="data/only_forehead_line/01056.png" width="23%" />
+  <img src="result/v3_innov_test/b01056_m01056/sample_20251127_010658_000.png" width="23%" />
+</div>
+
+
+
+<div align="center">
+  <img src="data/original_images/01056.png" width="23%" />
+  <img src="data/bald_images/01056.png" width="23%" />
   <img src="data/only_forehead_line/01057.png" width="23%" />
   <img src="result/v3_innov_test/b01056_m01057/sample_20251127_010829_000.png" width="23%" />
 </div>
