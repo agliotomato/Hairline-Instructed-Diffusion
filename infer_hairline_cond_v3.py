@@ -118,7 +118,11 @@ def main():
 
     # Load Latent IdentityNet (ControlNet)
     if args.controlnet_path:
-        controlnet = ControlNetModel.from_pretrained(args.controlnet_path).to(device, dtype=weight_dtype)
+        controlnet = ControlNetModel.from_pretrained(
+            args.controlnet_path,
+            low_cpu_mem_usage=False,
+            ignore_mismatched_sizes=True
+        ).to(device, dtype=weight_dtype)
     else:
         print("Warning: No ControlNet path provided. Initializing from UNet (untrained).")
         controlnet = ControlNetModel.from_unet(unet, load_weights_from_unet=True).to(device, dtype=weight_dtype)
