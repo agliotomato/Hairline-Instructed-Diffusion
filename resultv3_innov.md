@@ -13,6 +13,7 @@
 
 ```python
 # Weight Surgery Code Snippet
+# 주의: ControlNetModel의 입력 레이어 이름은 'conv_in_2'입니다.
 old_conv_weight = controlnet.conv_in_2.weight.data # Shape: [320, 4, 3, 3]
 new_conv_weight = torch.zeros((320, 5, 3, 3), device=controlnet.device)
 
@@ -50,26 +51,97 @@ python3 train_hairline_cond_v3.py \
   --dataloader_num_workers=0
 ```
 
+### 트러블슈팅 (Troubleshooting)
+*   **AttributeError: 'ControlNetModel' object has no attribute 'controlnet_cond_embedding'**:
+    *   **원인**: 커스텀 `ControlNetModel` 클래스는 일반적인 Diffusers 구조와 달리 `controlnet_cond_embedding`이 없고, 직접 `conv_in_2` 레이어를 사용합니다.
+    *   **해결**: Weight Surgery 대상을 `controlnet.conv_in_2.weight`로 수정했습니다.
+*   **SyntaxError: keyword argument repeated**:
+    *   **원인**: `controlnet` 호출 시 `encoder_hidden_states` 인자가 중복되었습니다.
+    *   **해결**: 중복된 인자를 제거했습니다.
+
 ---
 
 ## 3. 추론 (Inference)
 
 추론 시에도 학습과 동일하게 IdentityNet에 5채널 입력을 제공해야 합니다.
 
-### 추론 스크립트 수정 필요 사항
-`infer_hairline_cond_v3.py`를 다음과 같이 수정하여 사용해야 합니다:
-1.  Main UNet 입력 확장 로직(`enable_hairline_conditioning`) 제거.
-2.  IdentityNet 가중치 로드 시 5채널 호환성 확인.
-3.  Inference Loop에서 `controlnet_cond`를 `torch.cat([z_bald, mask_latent], dim=1)`로 구성하여 전달.
+### 추론 스크립트 (`infer_hairline_cond_v3.py`) 업데이트 완료
+현재 스크립트는 Innovation 전략에 맞춰 다음과 같이 수정되었습니다:
+1.  **Main UNet**: 순정 4채널 입력 사용 (`enable_hairline_conditioning` 제거).
+2.  **IdentityNet 입력**: `Bald Proxy` + `Mask`를 결합하여 **5채널 Condition** 생성.
+3.  **마스크 처리**: `nearest` 모드로 리사이징하여 경계선 보존.
 
 ### 추론 명령어 예시
 ```bash
 python3 infer_hairline_cond_v3.py \
-  --bald_path "data/"bald_images/01047.png" \
+  --bald_path "data/bald_images/01047.png" \
   --mask_path "data/only_forehead_line/01047.png" \
   --controlnet_path "hairline_cond_v3_innovation/controlnet" \
   --unet_path "hairline_cond_v3_innovation/unet" \
   --out_dir "result/v3_innov_test" \
   --init_latent noise \
   --noise_strength 1.0
+
 ```
+
+<div align="center">
+  <img src="data/original_images/01047.png" width="23%" />
+  <img src="data/bald_images/01047.png" width="23%" />
+  <img src="data/only_forehead_line/01047.png" width="23%" />
+  <img src="result/v3_innov_test/b01047_m01047/sample_20251127_011727_000.png" width="23%" />
+</div>
+
+<div align="center">
+  <img src="data/original_images/01047.png" width="23%" />
+  <img src="data/bald_images/01047.png" width="23%" />
+  <img src="data/only_forehead_line/01056.png" width="23%" />
+  <img src="result/v3_innov_test/b01047_m01056/sample_20251127_010438_000.png" width="23%" />
+</div>
+
+<div align="center">
+  <img src="data/original_images/01047.png" width="23%" />
+  <img src="data/bald_images/01047.png" width="23%" />
+  <img src="data/only_forehead_line/01057.png" width="23%" />
+  <img src="result/v3_innov_test/b01047_m01057/sample_20251127_010520_000.png" 
+  width="23%" />
+</div>
+
+<div align="center">
+  <img src="data/original_images/01056.png" width="23%" />
+  <img src="data/bald_images/01056.png" width="23%" />
+  <img src="data/only_forehead_line/01047.png" width="23%" />
+  <img src="result/v3_innov_test/b01056_m01047/sample_20251127_010553_000.png" width="23%" />
+</div>
+
+<div align="center">
+  <img src="data/original_images/01056.png" width="23%" />
+  <img src="data/bald_images/01056.png" width="23%" />
+  <img src="data/only_forehead_line/01057.png" width="23%" />
+  <img src="result/v3_innov_test/b01056_m01057/sample_20251127_010829_000.png" width="23%" />
+</div>
+
+<div align="center">
+  <img src="data/original_images/01057.png" width="23%" />
+  <img src="data/bald_images/01057.png" width="23%" />
+  <img src="data/only_forehead_line/01047.png" width="23%" />
+  <img src="result/v3_innov_test/b01057_m01047/sample_20251127_010908_000.png" width="23%" />
+</div>
+
+<div align="center">
+  <img src="data/original_images/01057.png" width="23%" />
+  <img src="data/bald_images/01057.png" width="23%" />
+  <img src="data/only_forehead_line/01056.png" width="23%" />
+  <img src="result/v3_innov_test/b01057_m01056/sample_20251127_010944_000.png" width="23%" />
+</div>
+
+<div align="center">
+  <img src="data/original_images/01057.png" width="23%" />
+  <img src="data/bald_images/01057.png" width="23%" />
+  <img src="data/only_forehead_line/01057.png" width="23%" />
+  <img src="result/v3_innov_test/b01057_m01057/sample_20251127_011019_000.png" width="23%" />
+</div>
+
+
+
+
+
