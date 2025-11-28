@@ -55,10 +55,28 @@ def main():
     # 1: Face (1-12, 15 - skin, features)
     # 2: Hair (13, 14 - hair, hat)
     
-    # Original Labels:
-    # 0: 'background', 1: 'skin', 2: 'nose', 3: 'eye_g', 4: 'l_eye', 5: 'r_eye',
-    # 6: 'l_brow', 7: 'r_brow', 8: 'l_ear', 9: 'r_ear', 10: 'mouth', 11: 'u_lip',
-    # 12: 'l_lip', 13: 'hair', 14: 'hat', 15: 'ear_r', 16: 'neck_l', 17: 'neck', 18: 'cloth'
+    # LABELS = {
+    # 0: 'background',
+    # 1: 'skin',
+    # 2: 'l_brow',
+    # 3: 'r_brow',
+    # 4: 'l_eye',
+    # 5: 'r_eye',
+    # 6: 'eye_g',
+    # 7: 'l_ear',
+    # 8: 'r_ear',
+    # 9: 'ear_r',   # Earring
+    # 10: 'nose',
+    # 11: 'mouth',  # Inside mouth
+    # 12: 'u_lip',
+    # 13: 'l_lip',
+    # 14: 'neck',
+    # 15: 'neck_l', # Necklace
+    # 16: 'cloth',
+    # 17: 'hair',   # ★ Target
+    # 18: 'hat'
+    # }
+    # 13 : l_lip, 14 : neck 10: nose 17: hair 16: cloth
 
     print(f"Processing {len(image_paths)} images...")
     
@@ -66,20 +84,24 @@ def main():
         for img_path in tqdm(image_paths):
             tensor = preprocess_image(str(img_path), mean, std).to(device)
             out, _, _ = net(tensor)
+            print(f"out shape: {out.shape}")
             parsing = out.squeeze(0).cpu().numpy().argmax(0)
+            print(f"parsing shape: {parsing.shape}")
+            print(f"unique classes in parsing: {np.unique(parsing)}")
             
             # Map to 3 classes
             new_mask = np.zeros_like(parsing, dtype=np.uint8)
             
             # Face (1)
-            face_indices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15]
+            face_indices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
             for idx in face_indices:
                 new_mask[parsing == idx] = 127 # 0.5 in float
-                
+
+
             # Hair (2)
-            hair_indices = [13, 14]
+            hair_indices = [17,18]
             for idx in hair_indices:
-                new_mask[parsing == idx] = 255 # 1.0 in float
+                new_mask[parsing == idx] = 255
                 
             # Background is already 0
             
