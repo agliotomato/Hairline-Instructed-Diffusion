@@ -69,7 +69,7 @@ class HairlineDatasetV2(Dataset):
         )
         self.mask_transform = transforms.Compose(
             [
-                transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.NEAREST),
                 transforms.ToTensor(),
             ]
         )

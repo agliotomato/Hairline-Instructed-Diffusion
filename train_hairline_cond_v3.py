@@ -125,21 +125,24 @@ def main():
     # 1. Get existing weights
     # Note: In this custom ControlNetModel, 'conv_in_2' processes the condition input.
     old_conv_weight = controlnet.conv_in_2.weight.data # Shape: [320, 4, 3, 3]
-    
-    # 2. Create new 5-channel kernel
-    new_conv_weight = torch.zeros((320, 5, 3, 3), device=controlnet.device)
-    
-    # 3. Copy existing weights (Preservation)
-    new_conv_weight[:, :4, :, :] = old_conv_weight
-    
-    # 4. Zero Initialize new channel (Gradual Learning)
-    new_conv_weight[:, 4:, :, :] = 0.0
-    
-    # 5. Transplant weights
-    controlnet.conv_in_2.weight.data = new_conv_weight
-    controlnet.config.conditioning_channels = 5 # Update config
-    
-    logger.info("Successfully performed Weight Surgery on Latent IdentityNet (conv_in_2: 4 -> 5 channels).")
+
+    if old_conv_weight.shape[1] == 4:
+        # 2. Create new 5-channel kernel
+        new_conv_weight = torch.zeros((320, 5, 3, 3), device=controlnet.device)
+        
+        # 3. Copy existing weights (Preservation)
+        new_conv_weight[:, :4, :, :] = old_conv_weight
+        
+        # 4. Zero Initialize new channel (Gradual Learning)
+        new_conv_weight[:, 4:, :, :] = 0.0
+        
+        # 5. Transplant weights
+        controlnet.conv_in_2.weight.data = new_conv_weight
+        controlnet.config.conditioning_channels = 5 # Update config
+        
+        logger.info("Successfully performed Weight Surgery on Latent IdentityNet (conv_in_2: 4 -> 5 channels).")
+    else:
+        logger.info(f"Skipping Weight Surgery: ControlNet already has {old_conv_weight.shape[1]} input channels.")
 
     # Main UNet remains pure (4 channels)
     # unet = enable_hairline_conditioning(unet, mask_channels=1) # REMOVED

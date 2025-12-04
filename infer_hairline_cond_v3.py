@@ -26,7 +26,7 @@ def preprocess_image(path: str, resolution: int) -> torch.Tensor:
 
 def preprocess_mask(path: str, resolution: int) -> torch.Tensor:
     mask = Image.open(path).convert("L")
-    mask = mask.resize((resolution, resolution), Image.BILINEAR)
+    mask = mask.resize((resolution, resolution), Image.NEAREST)
     tensor = transforms.ToTensor()(mask).unsqueeze(0)
     return torch.clamp(tensor, 0.0, 1.0)
 
