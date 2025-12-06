@@ -26,3 +26,5 @@ logs/
 result/
 hairline_cond_v3_run1/
 hairline_cond_v3_local_debug/
+vae_reconstruction_results/
+vae_reconstruction_results_old/
