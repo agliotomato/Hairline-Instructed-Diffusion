@@ -125,36 +125,35 @@ python3 infer_hairline_cond_v3.py \
   <img src="data/original_images/01047.png" width="23%" />
   <img src="data/bald_images/01047.png" width="23%" />
   <img src="data/only_forehead_line/01047.png" width="23%" />
-  <img src="result/v3_innov_test/b01047_m01047/sample_20251127_011727_000.png" width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101250_000.png" width="23%" />
 </div>
 
 <div align="center">
   <img src="data/original_images/01047.png" width="23%" />
   <img src="data/bald_images/01047.png" width="23%" />
   <img src="data/only_forehead_line/01056.png" width="23%" />
-  <img src="result/v3_innov_test/b01047_m01056/sample_20251127_010438_000.png" width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101550_000.png" width="23%" />
 </div>
 
 <div align="center">
   <img src="data/original_images/01047.png" width="23%" />
   <img src="data/bald_images/01047.png" width="23%" />
   <img src="data/only_forehead_line/01057.png" width="23%" />
-  <img src="result/v3_innov_test/b01047_m01057/sample_20251127_010520_000.png" 
-  width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101621_000.png" width="23%" />
 </div>
 
 <div align="center">
   <img src="data/original_images/01056.png" width="23%" />
   <img src="data/bald_images/01056.png" width="23%" />
   <img src="data/only_forehead_line/01047.png" width="23%" />
-  <img src="result/v3_innov_test/b01056_m01047/sample_20251127_010553_000.png" width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101650_000.png" width="23%" />
 </div>
 
 <div align="center">
   <img src="data/original_images/01056.png" width="23%" />
   <img src="data/bald_images/01056.png" width="23%" />
   <img src="data/only_forehead_line/01056.png" width="23%" />
-  <img src="result/v3_innov_test/b01056_m01056/sample_20251127_010658_000.png" width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101720_000.png" width="23%" />
 </div>
 
 
@@ -163,28 +162,28 @@ python3 infer_hairline_cond_v3.py \
   <img src="data/original_images/01056.png" width="23%" />
   <img src="data/bald_images/01056.png" width="23%" />
   <img src="data/only_forehead_line/01057.png" width="23%" />
-  <img src="result/v3_innov_test/b01056_m01057/sample_20251127_010829_000.png" width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101752_000.png" width="23%" />
 </div>
 
 <div align="center">
   <img src="data/original_images/01057.png" width="23%" />
   <img src="data/bald_images/01057.png" width="23%" />
   <img src="data/only_forehead_line/01047.png" width="23%" />
-  <img src="result/v3_innov_test/b01057_m01047/sample_20251127_010908_000.png" width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101820_000.png" width="23%" />
 </div>
 
 <div align="center">
   <img src="data/original_images/01057.png" width="23%" />
   <img src="data/bald_images/01057.png" width="23%" />
   <img src="data/only_forehead_line/01056.png" width="23%" />
-  <img src="result/v3_innov_test/b01057_m01056/sample_20251127_010944_000.png" width="23%" />
+ <img src="results/v3_innov_test/sample_20251206_101850_000.png" width="23%" />
 </div>
 
 <div align="center">
   <img src="data/original_images/01057.png" width="23%" />
   <img src="data/bald_images/01057.png" width="23%" />
   <img src="data/only_forehead_line/01057.png" width="23%" />
-  <img src="result/v3_innov_test/b01057_m01057/sample_20251127_011019_000.png" width="23%" />
+  <img src="results/v3_innov_test/sample_20251206_101918_000.png" width="23%" />
 </div>
 
 
