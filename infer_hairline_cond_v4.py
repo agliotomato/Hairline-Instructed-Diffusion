@@ -129,7 +129,13 @@ def main():
 
     # 3. Initialize Latents (Inpainting-style start)
     # We start from z_bald + noise (SDEdit style) to preserve identity
-    noise = torch.randn_like(z_bald, generator=generator)
+    # We start from z_bald + noise (SDEdit style) to preserve identity
+    noise = torch.randn(
+        z_bald.shape, 
+        device=device, 
+        dtype=weight_dtype, 
+        generator=generator
+    )
     
     # Calculate starting timestep based on noise_strength
     start_step = int(args.num_inference_steps * args.noise_strength)
