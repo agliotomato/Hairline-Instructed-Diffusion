@@ -100,7 +100,10 @@ def main():
     print(f"Loading ControlNet from {args.controlnet_path}...")
     controlnet = ControlNetModel.from_pretrained(
         args.controlnet_path,
-        torch_dtype=weight_dtype
+        torch_dtype=weight_dtype,
+        conditioning_channels=1, # FORCE 1-channel mode
+        low_cpu_mem_usage=False,
+        ignore_mismatched_sizes=True
     ).to(device)
 
     noise_scheduler = DDIMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
