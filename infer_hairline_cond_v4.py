@@ -11,6 +11,7 @@ from PIL import Image
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, ControlNetModel
 from transformers import AutoTokenizer, CLIPTextModel
 from torchvision import transforms
+from tqdm.auto import tqdm
 
 def preprocess_image(path: str, resolution: int) -> torch.Tensor:
     image = Image.open(path).convert("RGB")
