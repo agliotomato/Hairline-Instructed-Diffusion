@@ -140,9 +140,30 @@ class HairlineDatasetV2(Dataset):
         bald_pixel_values = self.image_transform(bald_image)
         mask_tensor = self.mask_transform(mask)
         mask_tensor = torch.clamp(mask_tensor, 0.0, 1.0)
+        
+        # [V4 Dual-Stream] Create Masked Bald Image (Identity Stream Input)
+        # Hair region (1.0 in mask) becomes 0.0 (Black) in masked_bald
+        # NOTE: pixel_values are normalized to [-1, 1], so we need careful masking.
+        # But here valid pixels are [-1, 1], masked pixels should probably be -1 (Black) or 0 (Grey)?
+        # Usually standard ControlNet expects [-1, 1]. -1 is black.
+        # Let's interact in [0, 1] space first then normalize?
+        # Actually bald_pixel_values is already simplified. 
+        # Let's do it on the raw tensor before normalization if possible, but here we have normalized values.
+        # Check normalization: transforms.Normalize([0.5...], [0.5...]) -> (x - 0.5) / 0.5 = 2x - 1.
+        # So Black (0) -> -1.
+        
+        # Formula: M = 1 where hair is.
+        # We want Result = Original where M=0, and Black where M=1.
+        # Result = Original * (1 - M) + Black * M
+        # Black is -1.
+        # So Result = Original * (1 - M) + (-1) * M
+        
+        masked_bald = bald_pixel_values * (1.0 - mask_tensor) + (-1.0) * mask_tensor
+        
         return {
             "orig_pixel_values": orig_pixel_values,
             "bald_pixel_values": bald_pixel_values,
+            "masked_bald_pixel_values": masked_bald,
             "hair_mask": mask_tensor,
             "prompt": sample["prompt"],
             "orig_path": str(sample["orig"]),

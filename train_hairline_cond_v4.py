@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
-from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel, ControlNetModel
+from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel, ControlNetModel, MultiControlNetModel
 from diffusers.optimization import get_scheduler
 from transformers import AutoTokenizer, CLIPTextModel
 from tqdm.auto import tqdm
@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Training script for hairline conditioned diffusion v4 (Pixel-space ControlNet).")
+    parser = argparse.ArgumentParser(description="Training script for Dual-Stream V4 (MultiControlNet).")
     parser.add_argument("--pretrained_model_name_or_path", type=str, default="runwayml/stable-diffusion-v1-5")
     parser.add_argument("--orig_dir", type=str, required=True, help="Directory with original hair images.")
     parser.add_argument("--bald_dir", type=str, required=True, help="Directory with aligned bald images.")
@@ -54,19 +54,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--dataloader_num_workers", type=int, default=4)
     parser.add_argument("--checkpoints_total_limit", type=int, default=None, help="Max number of checkpoints to keep.")
-    parser.add_argument("--controlnet_model_name_or_path", type=str, default=None, help="Path to pretrained ControlNet/IdentityNet weights.")
+    # NOTE: We can optionally load existing ControlNets here, but for V4 we init from scratch mostly.
     return parser.parse_args()
 
 
 def collate_fn(examples: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     orig_values = torch.stack([example["orig_pixel_values"] for example in examples])
     bald_values = torch.stack([example["bald_pixel_values"] for example in examples])
+    masked_bald_values = torch.stack([example["masked_bald_pixel_values"] for example in examples])
     masks = torch.stack([example["hair_mask"] for example in examples])
     prompts = [example["prompt"] for example in examples]
     return {
         "orig_pixel_values": orig_values,
         "bald_pixel_values": bald_values,
-        "hair_mask": masks, # (B, 1, 512, 512)
+        "masked_bald_pixel_values": masked_bald_values, # MultiControlNet Input 2
+        "hair_mask": masks, # MultiControlNet Input 1
         "prompt": prompts,
     }
 
@@ -89,69 +91,18 @@ def main():
     if accelerator.is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
-
-    if accelerator.is_main_process and args.report_to.lower() != "none":
-        accelerator.init_trackers("hairline_cond_v4", config=vars(args))
-
-    tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer", use_fast=False)
-    text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder")
-    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae")
-    unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
-    
-    # Initialize Standard ControlNet (Pixel-space)
-    if args.controlnet_model_name_or_path:
-        logger.info(f"Loading pretrained ControlNet from {args.controlnet_model_name_or_path}...")
-        controlnet = ControlNetModel.from_pretrained(args.controlnet_model_name_or_path)
-    else:
-        logger.info("Initializing ControlNet from UNet weights...")
-        # Note: conditioning_channels=1 tells it to expect 1-channel input, 
-        # but standard init usually assumes 3. We handle adaptation below.
-        controlnet = ControlNetModel.from_unet(unet)
-        
-        # [Innovation V4 Pixel-space] 3-channel (RGB) -> 1-channel (Mask) Adaptation
-        # The 'controlnet_cond_embedding' is the Tiny Encoder.
-        # Its first layer 'conv_in' is usually Conv2d(3, 16, ...)
-        
-        logger.info("Adapting ControlNet Tiny Encoder for 1-channel Mask Input...")
-        
-        # Access the Tiny Encoder's first layer
-        # Standard diffusers ControlNet structure: controlnet.controlnet_cond_embedding.conv_in
-        old_conv = controlnet.controlnet_cond_embedding.conv_in
-        
-        # Create new conv with 1 input channel
-        new_conv = nn.Conv2d(
-            in_channels=1, 
-            out_channels=old_conv.out_channels, 
-            kernel_size=old_conv.kernel_size, 
-            stride=old_conv.stride, 
-            padding=old_conv.padding
-        )
-        
-        # Initialize weights (Kaiming Normal for shape/edge learning)
-        nn.init.kaiming_normal_(new_conv.weight, mode='fan_out', nonlinearity='relu')
-        nn.init.constant_(new_conv.bias, 0)
-        
-        # Replace the layer
-        controlnet.controlnet_cond_embedding.conv_in = new_conv
-        
-        # Update config
-        controlnet.config.conditioning_channels = 1
-        
-        logger.info("Successfully adapted ControlNet Tiny Encoder to accept 1-channel inputs.")
-
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
-    unet.requires_grad_(False) # Main UNet is FROZEN
+    unet.requires_grad_(False)
     
-    controlnet.train() # Only ControlNet trains
+    controlnet.train()
 
     vae.eval()
     text_encoder.eval()
     unet.eval()
 
-    # Optimize only ControlNet parameters
     optimizer = torch.optim.AdamW(
         controlnet.parameters(),
         lr=args.learning_rate,
@@ -187,13 +138,10 @@ def main():
         num_training_steps=max_train_steps,
     )
 
-    # Prepare with Accelerator
-    # Note: UNet is not passed to prepare() because it's not being optimized
     controlnet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         controlnet, optimizer, train_dataloader, lr_scheduler
     )
     
-    # Move frozen models to device
     unet.to(accelerator.device)
     vae.to(accelerator.device)
     text_encoder.to(accelerator.device)
@@ -204,18 +152,14 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
-    # Cast frozen models to weight_dtype
     unet.to(dtype=weight_dtype)
     vae.to(dtype=weight_dtype)
     text_encoder.to(dtype=weight_dtype)
 
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     if accelerator.is_main_process:
-        logger.info("***** Running training (V4 - Pixel-space ControlNet) *****")
+        logger.info("***** Running training (V4 - Dual-Stream ControlNet) *****")
         logger.info(f"  Num examples = {len(train_dataset)}")
-        logger.info(f"  Num Epochs = {args.num_train_epochs}")
-        logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
-        logger.info(f"  Total train batch size = {total_batch_size}")
         logger.info(f"  Total optimization steps = {max_train_steps}")
 
     progress_bar = tqdm(range(max_train_steps), disable=not accelerator.is_local_main_process)
@@ -234,15 +178,19 @@ def main():
         controlnet.train()
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet):
-                # Convert inputs to weight_dtype
                 orig_pixel_values = batch["orig_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
                 
-                # Hair Mask is used as ControlNet Condition (Pixel Space 512x512)
+                # Input 1: Hair Mask (1ch)
                 hair_masks = batch["hair_mask"].to(device=accelerator.device, dtype=weight_dtype)
+                
+                # Input 2: Masked Bald Image (3ch)
+                masked_bald = batch["masked_bald_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
 
                 with torch.no_grad():
-                    # Encode input image to latent
                     z_orig = vae.encode(orig_pixel_values).latent_dist.sample() * vae.config.scaling_factor
+                    
+                    # [Hybrid V4] Encode Identity Input (Masked Bald) to Latents (64x64)
+                    masked_bald_latents = vae.encode(masked_bald).latent_dist.sample() * vae.config.scaling_factor
                     
                 noise = torch.randn_like(z_orig)
                 bsz = z_orig.shape[0]
@@ -251,12 +199,11 @@ def main():
                 ).long()
                 noisy_latents = noise_scheduler.add_noise(z_orig, noise, timesteps)
 
-                # Prepare ControlNet Input
-                # V4 Pixel-space: Use 512x512 mask DIRECTLY. No downsampling here.
-                # The Tiny Encoder inside ControlNet will handle the downsampling.
-                controlnet_cond = hair_masks
+                # Prepare Hybrid Dual Conditioning
+                # 1. Geometry: Pixel space (512x512)
+                # 2. Identity: Latent space (64x64)
+                controlnet_cond = [hair_masks, masked_bald_latents]
 
-                # Prepare Text Embeddings
                 text_inputs = tokenizer(
                     batch["prompt"],
                     padding="max_length",
@@ -268,8 +215,8 @@ def main():
                 with torch.no_grad():
                     encoder_hidden_states = text_encoder(input_ids)[0]
 
-                # 1. ControlNet Forward Pass
-                # Returns 13 residuals (12 down + 1 mid)
+                # MultiControlNet Forward
+                # It returns the SUM of residuals from all ControlNets
                 down_block_res_samples, mid_block_res_sample = controlnet(
                     sample=noisy_latents,
                     timestep=timesteps,
@@ -278,8 +225,6 @@ def main():
                     return_dict=False,
                 )
 
-                # 2. Main UNet Forward Pass with Additive Injection
-                # Using down_block_additional_residuals argument
                 model_pred = unet(
                     sample=noisy_latents,
                     timestep=timesteps,
@@ -288,8 +233,6 @@ def main():
                     mid_block_additional_residual=mid_block_res_sample,
                 ).sample
 
-                # 3. Compute Loss
-                # Target is the noise
                 loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
                 
                 accelerator.backward(loss)
@@ -305,7 +248,7 @@ def main():
                 global_step += 1
                 progress_bar.update(1)
                 progress_bar.set_postfix(loss=loss.item())
-                if accelerator.is_main_process:
+                if accelerator.is_main_process and args.report_to.lower() != "none":
                     accelerator.log({"train_loss": loss.detach().item()}, step=global_step)
 
                 if args.checkpointing_steps and global_step % args.checkpointing_steps == 0:
@@ -315,15 +258,13 @@ def main():
             if global_step >= max_train_steps:
                 break
 
-        if global_step >= max_train_steps:
-            break
-
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        # Save ControlNet
+        # Save MultiControlNet
+        # It needs to be saved as individual ControlNets usually, or as a directory with subfolders
         controlnet_dir = os.path.join(args.output_dir, "controlnet")
         accelerator.unwrap_model(controlnet).save_pretrained(controlnet_dir)
-        logger.info(f"Saved ControlNet weights to {controlnet_dir}")
+        logger.info(f"Saved Dual-Stream ControlNet weights to {controlnet_dir}")
 
     accelerator.end_training()
 
