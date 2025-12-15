@@ -87,6 +87,8 @@ def main():
         log_with=args.report_to if args.report_to.lower() != "none" else None,
         project_config=accelerator_project_config,
     )
+    logger.info(f"Accelerator Device: {accelerator.device}")
+    logger.info(f"Accelerator Mixed Precision: {accelerator.mixed_precision}")
 
     if args.seed is not None:
         set_seed(args.seed)
