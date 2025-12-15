@@ -241,6 +241,7 @@ def main():
                     timestep=timesteps,
                     encoder_hidden_states=encoder_hidden_states,
                     controlnet_cond=controlnet_cond,
+                    conditioning_scale=[1.0, 1.0],
                     return_dict=False,
                 )
 
