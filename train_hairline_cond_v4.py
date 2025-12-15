@@ -14,12 +14,14 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
-from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel, ControlNetModel, MultiControlNetModel
+from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel, MultiControlNetModel
+from diffusers import ControlNetModel as ControlNetModel_A
 from diffusers.optimization import get_scheduler
 from transformers import AutoTokenizer, CLIPTextModel
 from tqdm.auto import tqdm
 
 from utils.hairline_dataset_v2 import HairlineDatasetV2
+from utils.latent_identity_net import ControlNetModel as ControlNetModel_B
 
 logger = get_logger(__name__)
 
@@ -97,6 +99,20 @@ def main():
     text_encoder.requires_grad_(False)
     unet.requires_grad_(False)
     
+    
+    # [V4 Hybrid] Initialize Dual-Stream ControlNets
+    # Stream A: Geometry (Pixel Space) -> Standard ControlNet (diffusers)
+    # Input: 1-channel binary mask (512x512)
+    logger.info("Initializing Stream A (Geometry) ControlNet...")
+    controlnet_a = ControlNetModel_A.from_unet(unet, conditioning_channels=1)
+
+    # Stream B: Identity (Latent Space) -> Custom Latent Identity Net
+    # Input: 4-channel masked val latents (64x64)
+    logger.info("Initializing Stream B (Identity) ControlNet...")
+    controlnet_b = ControlNetModel_B.from_unet(unet, conditioning_channels=4)
+
+    # Combine into MultiControlNet
+    controlnet = MultiControlNetModel([controlnet_a, controlnet_b])
     controlnet.train()
 
     vae.eval()
