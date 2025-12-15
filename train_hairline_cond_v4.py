@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
-from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel, MultiControlNetModel
+from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
+from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from diffusers import ControlNetModel as ControlNetModel_A
 from diffusers.optimization import get_scheduler
 from transformers import AutoTokenizer, CLIPTextModel
