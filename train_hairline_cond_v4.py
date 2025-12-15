@@ -157,20 +157,18 @@ def main():
     controlnet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         controlnet, optimizer, train_dataloader, lr_scheduler
     )
-    
-    unet.to(accelerator.device)
-    vae.to(accelerator.device)
-    text_encoder.to(accelerator.device)
 
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
         weight_dtype = torch.float16
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
-
-    unet.to(dtype=weight_dtype)
-    vae.to(dtype=weight_dtype)
-    text_encoder.to(dtype=weight_dtype)
+    
+    # Cast models to weight_dtype
+    unet.to(accelerator.device, dtype=weight_dtype)
+    vae.to(accelerator.device, dtype=weight_dtype)
+    text_encoder.to(accelerator.device, dtype=weight_dtype)
+    controlnet.to(accelerator.device, dtype=weight_dtype)
 
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     if accelerator.is_main_process:
