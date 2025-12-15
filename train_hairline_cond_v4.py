@@ -237,11 +237,11 @@ def main():
                 # MultiControlNet Forward
                 # It returns the SUM of residuals from all ControlNets
                 down_block_res_samples, mid_block_res_sample = controlnet(
-                    sample=noisy_latents,
-                    timestep=timesteps,
-                    encoder_hidden_states=encoder_hidden_states,
-                    controlnet_cond=controlnet_cond,
-                    conditioning_scale=[1.0, 1.0],
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states,
+                    controlnet_cond,
+                    [1.0, 1.0],
                     return_dict=False,
                 )
 
