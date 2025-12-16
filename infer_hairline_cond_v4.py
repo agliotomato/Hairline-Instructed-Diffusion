@@ -8,7 +8,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, ControlNetModel as PixelControlNet, MultiControlNetModel
+from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, ControlNetModel as PixelControlNet
+from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 from transformers import AutoTokenizer, CLIPTextModel
 from torchvision import transforms
 from tqdm.auto import tqdm
