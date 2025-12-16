@@ -109,9 +109,9 @@ def main():
 
     # 1. Load Models
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer", use_fast=False)
-    text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder").to(device, dtype=weight_dtype)
-    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae").to(device, dtype=weight_dtype)
-    unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet").to(device, dtype=weight_dtype)
+    text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder").to(device)
+    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae").to(device)
+    unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet").to(device)
     
     # Load Hybrid MultiControlNet
     # NOTE: Since `MultiControlNetModel` loads a LIST of ControlNets, and they have different classes (Pixel vs Latent)
@@ -123,55 +123,40 @@ def main():
     # If saved via `accelerator.unwrap_model(controlnet).save_pretrained(...)`, it likely saved a pipeline-compatible folder structure or just the model.
     # If it's a MultiControlNet, it saves as a list of configs.
     
-    print(f"Loading Hybrid MultiControlNet from {args.controlnet_path}...")
-    # Manual Loading Strategy for Hybrid
-    # We assume standard structure or specific naming.
-    # For now let's try standard load, if fail, we might need manual composition.
-    # Re-instantiating `MultiControlNetModel` manually is safest given mixed types.
+    print(f"Loading Hybrid MultiControlNet components from {args.controlnet_path}...")
     
-    # Assuming the checkpoint dir has subfolders like `controlnet_0` (Pixel) and `controlnet_1` (Latent)
-    # OR if it's a single dump.
-    # If `save_pretrained` was called on MultiControlNet, it saves them.
-    # Let's try to load individual components if possible or use the wrapper.
-    # Given the complexity, let's assume the user points to a folder containing subfolders or config.
+    # Path setup based on user observation (controlnet, controlnet_1)
+    # We allow args.controlnet_path to be the parent dir containing these, or explicit paths.
+    # Assumption: args.controlnet_path points to "hairline_cond_v4_hybrid"
+    base_path = Path(args.controlnet_path)
     
-    try:
-        # Attempt standard load - might fail on Custom Class
-        # controlnet = MultiControlNetModel.from_pretrained(args.controlnet_path, torch_dtype=weight_dtype)
-        # We need to explicitly tell it to use LatentControlNet for the second one.
-        # This is tough with standard API.
+    # Try to locate the two controlnets
+    # Strategy 1: Look for "controlnet" and "controlnet_1" subfolders
+    path_a = base_path / "controlnet"
+    path_b = base_path / "controlnet_1"
+    
+    if not path_a.exists():
+        # Maybe the user pointed directly to "controlnet"? then where is "controlnet_1"?
+        # Let's fallback to assuming the user provided a directory that MIGHT capture them or standard loading.
+        # But per instruction, we expect these two.
+        print(f"Warning: {path_a} not found. Trying standard load from {base_path}...")
+        try:
+             controlnet = MultiControlNetModel.from_pretrained(args.controlnet_path).to(device)
+        except Exception as e:
+             raise ValueError(f"Could not load MultiControlNet from {args.controlnet_path}. Ensure 'controlnet' and 'controlnet_1' folders exist or path is correct. Error: {e}")
+    else:
+        print(f"Loading Stream A (Geometry) from {path_a}")
+        cnet_a = PixelControlNet.from_pretrained(path_a).to(device)
         
-        # Alternative: Load individually.
-        # We assume the user creates `hairline_cond_v4_test/controlnet` which contains the saved controlnets.
-        # `MultiControlNetModels` usually save as a list.
-        # Checkpoint structure: `controlnet/config.json` (if single) or `controlnet/nats/config.json` etc?
-        # Actually `MultiControlNetModel.save_pretrained` creates `config.json` which lists `nets`.
+        print(f"Loading Stream B (Identity) from {path_b}")
+        # Validate path_b
+        if not path_b.exists():
+             raise ValueError(f"Found 'controlnet' but not 'controlnet_1' in {base_path}. Both are required for Hybrid V4.")
+             
+        cnet_b = LatentControlNet.from_pretrained(path_b).to(device)
         
-        # Let's just manually load from subpaths if standard fails, 
-        # BUT for now, to make it work, let's Instantiate and Load State Dict if needed, 
-        # or load from specific sub-paths if `save_pretrained` separated them.
-        
-        # HACK: For this specific script, let's assume we load them from the saved path.
-        # If `save_pretrained` saved them as a list, we might have multiple folders. 
-        # Let's iterate.
-        
-        # Simplified for now: Assume standard load works OR we catch error.
-        # Providing specific classes to `from_pretrained` is not directly supported for MultiNet list.
-        # We will try to load `controlnet_geo` and `controlnet_id` from subfolders if they exist.
-        
-        # Let's assume the save path has `nets` or similar.
-        # Actually, `accelerate` save might just dump the state dict?
-        # `save_pretrained` of MultiControlNet DOES save separate configs.
-        
-        # Let's try loading them assuming they are in `controlnet_path` subfolders if standard load fails.
-        controlnet = MultiControlNetModel.from_pretrained(args.controlnet_path, torch_dtype=weight_dtype)
-    except Exception as e:
-        print(f"Standard loading failed ({e}). Attempting manual Hybrid load...")
-        # Fallback: Assume we have to load specific classes from sub-paths.
-        # This is tricky without knowing exact folder structure of `save_pretrained`.
-        # Taking a guess: it saves config.json and diffusion_pytorch_model.bin for the whole thing OR subfolders?
-        # Diffusers MultiControlNet usually essentially behaves like a List.
-        raise e
+        controlnet = MultiControlNetModel([cnet_a, cnet_b])
+        print("Successfully combined separate ControlNets.")
 
     controlnet.to(device)
 
@@ -186,7 +171,7 @@ def main():
 
     # 2. Process Input
     # Base Latents (from Bald Image)
-    image_tensor = preprocess_image(args.bald_path, args.resolution).to(device, dtype=weight_dtype)
+    image_tensor = preprocess_image(args.bald_path, args.resolution).to(device)
     with torch.no_grad():
         z_bald = vae.encode(image_tensor).latent_dist.sample() * vae.config.scaling_factor
     z_bald = z_bald.repeat(args.num_samples, 1, 1, 1)
@@ -195,18 +180,18 @@ def main():
     mask_tensor, masked_bald_tensor = preprocess_conditions(args.mask_path, args.bald_path, args.resolution)
     
     # 2.1 [Hybrid] Encode Identity Condition to Latents
-    masked_bald_tensor = masked_bald_tensor.to(device, dtype=weight_dtype)
+    masked_bald_tensor = masked_bald_tensor.to(device)
     with torch.no_grad():
          masked_bald_latents = vae.encode(masked_bald_tensor).latent_dist.sample() * vae.config.scaling_factor
     
     masked_bald_latents = masked_bald_latents.repeat(args.num_samples, 1, 1, 1)
-    mask_tensor = mask_tensor.to(device, dtype=weight_dtype).repeat(args.num_samples, 1, 1, 1)
+    mask_tensor = mask_tensor.to(device).repeat(args.num_samples, 1, 1, 1)
     
     # MultiControlNet Condition: List [Geometry(Pixel), Identity(Latent)]
     controlnet_cond = [mask_tensor, masked_bald_latents]
 
     # 3. Initialize Latents
-    noise = torch.randn(z_bald.shape, device=device, dtype=weight_dtype, generator=generator)
+    noise = torch.randn(z_bald.shape, device=device, generator=generator)
     start_step = int(args.num_inference_steps * args.noise_strength)
     start_timestep = noise_scheduler.timesteps[start_step]
     latents = noise_scheduler.add_noise(z_bald, noise, start_timestep)
@@ -215,9 +200,9 @@ def main():
     text_embeddings, uncond_embeddings = encode_texts(
         tokenizer, text_encoder, args.prompt, args.negative_prompt, device, args.num_samples
     )
-    text_embeddings = text_embeddings.to(dtype=weight_dtype)
-    if uncond_embeddings is not None:
-        uncond_embeddings = uncond_embeddings.to(dtype=weight_dtype)
+    # text_embeddings = text_embeddings.to(dtype=weight_dtype) # Keep in FP32
+    # if uncond_embeddings is not None:
+    #     uncond_embeddings = uncond_embeddings.to(dtype=weight_dtype)
 
     # 5. Denoising Loop
     timesteps_to_run = noise_scheduler.timesteps[start_step:]
