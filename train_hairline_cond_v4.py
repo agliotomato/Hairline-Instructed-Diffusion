@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mixed_precision", type=str, default="no", choices=["no", "fp16", "bf16"])
     parser.add_argument("--report_to", type=str, default="tensorboard", help="TensorBoard/W&B/etc.")
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--dataloader_num_workers", type=int, default=4)
+    parser.add_argument("--dataloader_num_workers", type=int, default=0)
     parser.add_argument("--checkpoints_total_limit", type=int, default=None, help="Max number of checkpoints to keep.")
     # NOTE: We can optionally load existing ControlNets here, but for V4 we init from scratch mostly.
     return parser.parse_args()
@@ -171,11 +171,13 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
     
-    # Cast models to weight_dtype
-    unet.to(accelerator.device, dtype=weight_dtype)
-    vae.to(accelerator.device, dtype=weight_dtype)
-    text_encoder.to(accelerator.device, dtype=weight_dtype)
-    controlnet.to(accelerator.device, dtype=weight_dtype)
+    # Remove manual casting to weight_dtype to avoid GroupNorm mixed-precision errors (CPU/Half mismatch)
+    # Instead, we keep models in FP32 and use accelerator.autocast()
+    unet.to(accelerator.device)
+    vae.to(accelerator.device)
+    text_encoder.to(accelerator.device)
+    # controlnet is already prepared (moved to device), no need to cast
+
 
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     if accelerator.is_main_process:
@@ -199,61 +201,62 @@ def main():
         controlnet.train()
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet):
-                orig_pixel_values = batch["orig_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
+                orig_pixel_values = batch["orig_pixel_values"].to(device=accelerator.device)
                 
                 # Input 1: Hair Mask (1ch)
-                hair_masks = batch["hair_mask"].to(device=accelerator.device, dtype=weight_dtype)
+                hair_masks = batch["hair_mask"].to(device=accelerator.device)
                 
                 # Input 2: Masked Bald Image (3ch)
-                masked_bald = batch["masked_bald_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
+                masked_bald = batch["masked_bald_pixel_values"].to(device=accelerator.device)
 
-                with torch.no_grad():
-                    z_orig = vae.encode(orig_pixel_values).latent_dist.sample() * vae.config.scaling_factor
-                    
-                    # [Hybrid V4] Encode Identity Input (Masked Bald) to Latents (64x64)
-                    masked_bald_latents = vae.encode(masked_bald).latent_dist.sample() * vae.config.scaling_factor
-                    
-                noise = torch.randn_like(z_orig)
-                bsz = z_orig.shape[0]
-                timesteps = torch.randint(
-                    0, noise_scheduler.config.num_train_timesteps, (bsz,), device=z_orig.device
-                ).long()
-                noisy_latents = noise_scheduler.add_noise(z_orig, noise, timesteps)
+                with accelerator.autocast():
+                    with torch.no_grad():
+                        z_orig = vae.encode(orig_pixel_values).latent_dist.sample() * vae.config.scaling_factor
+                        
+                        # [Hybrid V4] Encode Identity Input (Masked Bald) to Latents (64x64)
+                        masked_bald_latents = vae.encode(masked_bald).latent_dist.sample() * vae.config.scaling_factor
+                        
+                    noise = torch.randn_like(z_orig)
+                    bsz = z_orig.shape[0]
+                    timesteps = torch.randint(
+                        0, noise_scheduler.config.num_train_timesteps, (bsz,), device=z_orig.device
+                    ).long()
+                    noisy_latents = noise_scheduler.add_noise(z_orig, noise, timesteps)
 
-                # Prepare Hybrid Dual Conditioning
-                # 1. Geometry: Pixel space (512x512)
-                # 2. Identity: Latent space (64x64)
-                controlnet_cond = [hair_masks, masked_bald_latents]
+                    # Prepare Hybrid Dual Conditioning
+                    # 1. Geometry: Pixel space (512x512)
+                    # 2. Identity: Latent space (64x64)
+                    controlnet_cond = [hair_masks, masked_bald_latents]
 
-                text_inputs = tokenizer(
-                    batch["prompt"],
-                    padding="max_length",
-                    truncation=True,
-                    max_length=tokenizer.model_max_length,
-                    return_tensors="pt",
-                )
-                input_ids = text_inputs.input_ids.to(device=accelerator.device)
-                with torch.no_grad():
-                    encoder_hidden_states = text_encoder(input_ids)[0]
+                    text_inputs = tokenizer(
+                        batch["prompt"],
+                        padding="max_length",
+                        truncation=True,
+                        max_length=tokenizer.model_max_length,
+                        return_tensors="pt",
+                    )
+                    input_ids = text_inputs.input_ids.to(device=accelerator.device)
+                    with torch.no_grad():
+                        encoder_hidden_states = text_encoder(input_ids)[0]
 
-                # MultiControlNet Forward
-                # It returns the SUM of residuals from all ControlNets
-                down_block_res_samples, mid_block_res_sample = controlnet(
-                    noisy_latents,
-                    timesteps,
-                    encoder_hidden_states,
-                    controlnet_cond,
-                    [1.0, 1.0],
-                    return_dict=False,
-                )
+                    # MultiControlNet Forward
+                    # It returns the SUM of residuals from all ControlNets
+                    down_block_res_samples, mid_block_res_sample = controlnet(
+                        noisy_latents,
+                        timesteps,
+                        encoder_hidden_states,
+                        controlnet_cond,
+                        [1.0, 1.0],
+                        return_dict=False,
+                    )
 
-                model_pred = unet(
-                    sample=noisy_latents,
-                    timestep=timesteps,
-                    encoder_hidden_states=encoder_hidden_states,
-                    down_block_additional_residuals=down_block_res_samples,
-                    mid_block_additional_residual=mid_block_res_sample,
-                ).sample
+                    model_pred = unet(
+                        sample=noisy_latents,
+                        timestep=timesteps,
+                        encoder_hidden_states=encoder_hidden_states,
+                        down_block_additional_residuals=down_block_res_samples,
+                        mid_block_additional_residual=mid_block_res_sample,
+                    ).sample
 
                 loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
                 
