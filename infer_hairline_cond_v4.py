@@ -193,8 +193,13 @@ def main():
 
     # 3. Initialize Latents
     noise = torch.randn(z_bald.shape, device=device, generator=generator)
-    start_step = int(args.num_inference_steps * args.noise_strength)
-    start_timestep = noise_scheduler.timesteps[start_step]
+    # Fix: args.noise_strength should determine how many steps we RUN, not how many we SKIP.
+    # Strength 0.9 means we want to modify 90% of the steps (start early), preserving only 10% of original.
+    # Start index should be low (e.g., 0 or small) for high strength.
+    init_timestep_idx = int(args.num_inference_steps * (1.0 - args.noise_strength))
+    init_timestep_idx = max(0, min(init_timestep_idx, args.num_inference_steps - 1))
+    
+    start_timestep = noise_scheduler.timesteps[init_timestep_idx]
     latents = noise_scheduler.add_noise(z_bald, noise, start_timestep)
 
     # 4. Text Embeddings
@@ -206,8 +211,8 @@ def main():
     #     uncond_embeddings = uncond_embeddings.to(dtype=weight_dtype)
 
     # 5. Denoising Loop
-    timesteps_to_run = noise_scheduler.timesteps[start_step:]
-    print(f"Starting inference from step {start_step} (Strength: {args.noise_strength})...")
+    timesteps_to_run = noise_scheduler.timesteps[init_timestep_idx:]
+    print(f"Starting inference from step {init_timestep_idx} (Strength: {args.noise_strength}, Running {len(timesteps_to_run)} steps)...")
     
     control_scales = args.controlnet_scales if len(args.controlnet_scales) == 2 else [1.0, 1.0]
 
