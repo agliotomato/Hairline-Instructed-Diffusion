@@ -144,7 +144,12 @@ seed
 까지 포함하여,
 **“대머리 이미지 + 이마라인 mask → 현실적 헤어 생성”**이라는 목적을 달성할 수 있는 end-to-end 시스템 전체가 완성되었다.
 
-### visualize_latents.py 스크립트 추가.
+
+### 대머리 만들기
+```
+root@ba4783aa2081:/workspace/Stable-Hair/Stable-Hair#  python3 generate_bald.py --input_path "inputs/test5.jpg" --output_path "outputs/test5.jpg" --model_path "models/stage1/pytorch_model.bin"
+```
+### `visualize_latents.py 스크립트 추가.
 - Stable Diffusion VAE를 사용해
     - 원본 이미지
     - 대머리 이미지
@@ -321,6 +326,12 @@ extract_forehead_hairline.py
   <img src="data/only_forehead_line/01057.png" width="22%" />
 </p>
 
+###  BiseNET
+```bash
+python3 generate_semantic_masks.py \
+  --images_dir "data/original_images/test1.png" \
+  --output_dir "data/semantic_masks/test1.png"
+```
 ### train
 > python3 train_hairline_cond.py \
 >     --pretrained_model_name_or_path runwayml/stable-diffusion-v1-5 \
