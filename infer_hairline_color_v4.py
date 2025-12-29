@@ -227,7 +227,6 @@ def main():
             print(f"Warning: Trigger word '{args.color_trigger}' not found in prompt. Skipping Mask Guidance.")
 
     # 4. Run Inference
-    generator = torch.utils.data.RandomSampler(None) # Dummy
     latents = z_bald.clone()
     noise = torch.randn_like(latents)
     
