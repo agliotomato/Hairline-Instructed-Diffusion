@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -276,7 +277,8 @@ def main():
     img_pil = transforms.ToPILImage()(image[0])
     
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
-    out_path = Path(args.out_dir) / "output_color_control.png"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = Path(args.out_dir) / f"output_{timestamp}.png"
     img_pil.save(out_path)
     print(f"Saved to {out_path}")
 
