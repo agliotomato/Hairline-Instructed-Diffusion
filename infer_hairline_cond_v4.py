@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 
 # Import Custom Latent ControlNet
 from utils.latent_identity_net import ControlNetModel as LatentControlNet
+from utils.attention_utils import MaskedCrossAttnProcessor, get_token_indices, create_mask_pyramid
 
 
 def preprocess_image(path: str, resolution: int) -> torch.Tensor:
@@ -98,6 +99,7 @@ def main():
     parser.add_argument("--dtype", type=str, choices=["fp32", "fp16", "bf16"], default="fp16")
     parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--noise_strength", type=float, default=0.9)
+    parser.add_argument("--color_trigger", type=str, default="", help="Words to restrict to mask area (e.g. 'black hair')")
     args = parser.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -190,6 +192,26 @@ def main():
     
     # MultiControlNet Condition: List [Geometry(Pixel), Identity(Latent)]
     controlnet_cond = [mask_tensor, masked_bald_latents]
+
+    # --- Setup Mask Guided Attention ---
+    if args.color_trigger:
+        target_indices = get_token_indices(tokenizer, args.prompt, args.color_trigger)
+        if target_indices:
+            print(f"Enabling Mask-Guided Attention for tokens: {target_indices}")
+            # Ensure mask_tensor is on device and ready
+            mask_pyramid = create_mask_pyramid(mask_tensor.to(device), max_res=64)
+            
+            attn_procs = {}
+            for name in unet.attn_processors.keys():
+                if "attn2" in name:
+                    attn_procs[name] = MaskedCrossAttnProcessor(mask_pyramid, target_indices)
+                else:
+                    attn_procs[name] = unet.attn_processors[name]
+            
+            unet.set_attn_processor(attn_procs)
+        else:
+            print(f"Warning: Trigger word '{args.color_trigger}' not found in prompt. Skipping Mask Guidance.")
+    # -----------------------------------
 
     # 3. Initialize Latents
     noise = torch.randn(z_bald.shape, device=device, generator=generator)
