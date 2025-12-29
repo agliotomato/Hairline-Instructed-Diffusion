@@ -252,6 +252,7 @@ def main():
                     latent_input, t, 
                     encoder_hidden_states=torch.cat([uncond_embeddings, text_embeddings]),
                     controlnet_cond=cond_input,
+                    conditioning_scale=[1.0, 1.0],
                     return_dict=False
                 )
                 
