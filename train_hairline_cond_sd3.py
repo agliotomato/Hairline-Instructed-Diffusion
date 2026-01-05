@@ -311,9 +311,12 @@ def main():
     
     controlnet_b.load_state_dict(compatible_state_dict, strict=False)
     
-    controlnet_b.requires_grad_(True)
     controlnet_b.train()
     
+    # Cast ControlNets to correct precision (FP16)
+    controlnet_a.to(dtype=weight_dtype)
+    controlnet_b.to(dtype=weight_dtype)
+
     controlnet_a.requires_grad_(True)
     controlnet_b.requires_grad_(True)
     
@@ -389,6 +392,8 @@ def main():
                         device=accelerator.device, # Use accelerator device
                         do_classifier_free_guidance=False 
                     )
+                    prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
+                    pooled_prompt_embeds = pooled_prompt_embeds.to(dtype=weight_dtype)
                     
                 # 2. VAE Encode
                 pixel_values = batch["pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
