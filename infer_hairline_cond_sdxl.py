@@ -9,8 +9,10 @@ from diffusers import (
     AutoencoderKL,
     DDPMScheduler
 )
-from diffusers.utils import load_image
 import numpy as np
+
+# [V4 Philosophy] Use specialized Latent Identity Net
+from utils.latent_identity_net import ControlNetModel as LatentIdentityNet
 
 def main():
     parser = argparse.ArgumentParser(description="SDXL Hybrid ControlNet Inference")
@@ -36,16 +38,16 @@ def main():
 
     # 1. Load Models
     print("⏳ Loading Models...")
-    from diffusers import UNet2DConditionModel
+    from diffusers import UNet2DConditionModel, EulerDiscreteScheduler
     from safetensors.torch import load_file
 
     vae = AutoencoderKL.from_pretrained(args.vae_model_name_or_path, torch_dtype=weight_dtype).to(device)
     
     # Initialize ControlNets from UNet structure (matching training)
-    print("  - Initializing ControlNet structures from UNet...")
+    print("  - Initializing ControlNet structures from UNet (1ch Geo, 4ch Latent ID)...")
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", torch_dtype=weight_dtype).to(device)
-    controlnet_a = ControlNetModel.from_unet(unet).to(device, dtype=weight_dtype)
-    controlnet_b = ControlNetModel.from_unet(unet).to(device, dtype=weight_dtype)
+    controlnet_a = ControlNetModel.from_unet(unet, conditioning_channels=1).to(device, dtype=weight_dtype)
+    controlnet_b = LatentIdentityNet.from_unet(unet, conditioning_channels=4).to(device, dtype=weight_dtype)
     del unet # Free VRAM
     
     # Load Weights manually from Accelerator state
@@ -69,20 +71,44 @@ def main():
         use_safetensors=True
     ).to(device)
     
+    # Speed Optimization: Use EulerDiscreteScheduler
+    pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
     pipe.enable_xformers_memory_efficient_attention()
 
     # 2. Preprocess Inputs
     print("⏳ Preprocessing Inputs...")
     bald_image = Image.open(args.bald_path).convert("RGB").resize((args.resolution, args.resolution))
-    mask_image = Image.open(args.mask_path).convert("RGB").resize((args.resolution, args.resolution))
+    mask_image = Image.open(args.mask_path).convert("L").resize((args.resolution, args.resolution)) # 1ch
     
-    # SDXL ControlNet Img2Img Pipeline
-    # image: base image to add noise to
-    # control_image: list of images for controlnets
-    control_images = [mask_image, bald_image]
+    # Identity Masking & Latent Encoding
+    def get_masked_latents(bald, mask, vae, device, dtype):
+        from torchvision import transforms
+        # Match training preprocessing
+        norm = transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+        t_bald = norm(transforms.ToTensor()(bald)).unsqueeze(0).to(device, dtype=dtype)
+        t_mask = transforms.ToTensor()(mask).unsqueeze(0).to(device, dtype=dtype)
+        
+        # Masking: bald * (1 - mask) + (-1) * mask
+        masked_id = t_bald * (1.0 - t_mask) + (-1.0) * t_mask
+        
+        # Encode to latent space
+        with torch.no_grad():
+            latents = vae.encode(masked_id).latent_dist.sample()
+            latents = latents * vae.config.scaling_factor
+        return latents
+
+    print("  - Encoding Identity Condition to Latent Space...")
+    cond_id_latents = get_masked_latents(bald_image, mask_image, vae, device, weight_dtype)
+    
+    # Geometry Condition: 1ch Tensor [0, 1]
+    from torchvision import transforms
+    cond_geo_tensor = transforms.ToTensor()(mask_image).unsqueeze(0).to(device, dtype=weight_dtype)
+
+    # control_image: list of tensors for controlnets
+    control_images = [cond_geo_tensor, cond_id_latents]
 
     # 3. Inference
-    print(f"🚀 Generating Image with prompt: {args.prompt} (Strength: {args.strength})")
+    print(f"🚀 Generating Image with prompt: {args.prompt} (Steps: {args.num_inference_steps}, Strength: {args.strength})")
     generator = torch.Generator(device=device).manual_seed(args.seed)
     
     image = pipe(
@@ -96,7 +122,7 @@ def main():
         controlnet_conditioning_scale=args.controlnet_scales,
         generator=generator,
     ).images[0]
-
+    
     # 4. Save
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path)

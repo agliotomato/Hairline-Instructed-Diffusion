@@ -39,6 +39,9 @@ from diffusers.utils.import_utils import is_xformers_available
 # Add SDXL specific imports
 from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
 
+# [V4 Philosophy] Use specialized Latent Identity Net
+from utils.latent_identity_net import ControlNetModel as LatentIdentityNet
+
 # Check versions
 check_min_version("0.29.0")
 
@@ -137,18 +140,6 @@ class HairlineDataset(torch.utils.data.Dataset):
         # Default prompt
         self.prompt = "a photo of a person with realistic hairstyle" 
 
-        self.transform_image = transforms.Compose([
-            transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
-        
-        # Masks (Geometry): 3ch 
-        self.transform_mask = transforms.Compose([
-            transforms.Resize((size, size), interpolation=transforms.InterpolationMode.NEAREST),
-            transforms.ToTensor(), # [0, 1]
-        ])
-
     def _find_file(self, directory, name):
         for ext in ['.png', '.jpg', '.jpeg']:
             path = directory / f"{name}{ext}"
@@ -162,28 +153,40 @@ class HairlineDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         item = self.images[idx]
         
-        # Load Target Image (Original with Hair)
-        image = Image.open(item["orig"]).convert("RGB")
-        
-        # Load Bald Image (Identity)
+        # Load Images
+        orig_image = Image.open(item["orig"]).convert("RGB")
         bald_image = Image.open(item["bald"]).convert("RGB")
-        
-        # Load Mask (Geometry)
-        mask_image = Image.open(item["mask"]).convert("RGB") # Use RGB for 3ch input compatibility
+        mask_image = Image.open(item["mask"]).convert("L") # V4 Philosophy: 1ch Geometry Mask
 
-        # Transform
-        pixel_values = self.transform_image(image)
-        condition_identity = self.transform_image(bald_image) # Same normalization as image? Yes, it's an image input.
-        condition_geometry = self.transform_mask(mask_image)
+        # 1. Synchronized Resize
+        orig_image = orig_image.resize((self.size, self.size), Image.BILINEAR)
+        bald_image = bald_image.resize((self.size, self.size), Image.BILINEAR)
+        mask_image = mask_image.resize((self.size, self.size), Image.NEAREST)
+
+        # 2. Synchronized Horizontal Flip (Augmentation)
+        do_flip = random.random() < 0.5
+        if do_flip:
+            orig_image = orig_image.transpose(Image.FLIP_LEFT_RIGHT)
+            bald_image = bald_image.transpose(Image.FLIP_LEFT_RIGHT)
+            mask_image = mask_image.transpose(Image.FLIP_LEFT_RIGHT)
+
+        # 3. Base Transform (To Tensor + Normalize)
+        # We need mask in [0, 1] for math
+        mask_tensor = transforms.ToTensor()(mask_image) # 1ch [0, 1]
+        mask_tensor = torch.clamp(mask_tensor, 0.0, 1.0) 
         
-        # Create Masked Bald Image (Identity + Mask applied roughly? No, just pass bald image as condition)
-        # Actually, for Identity ControlNet, we usually pass the reference image. 
-        # Here 'bald_image' is the reference for identity.
+        # Normalize images to [-1, 1]
+        norm = transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+        orig_pixel_values = norm(transforms.ToTensor()(orig_image))
+        bald_pixel_values = norm(transforms.ToTensor()(bald_image))
+        
+        # 4. Create Masked Identity Condition (V4 Style)
+        masked_identity = bald_pixel_values * (1.0 - mask_tensor) + (-1.0) * mask_tensor
         
         return {
-            "pixel_values": pixel_values,
-            "condition_geometry": condition_geometry,
-            "condition_identity": condition_identity,
+            "pixel_values": orig_pixel_values,
+            "condition_geometry": mask_tensor, # 1ch Geometry Mask
+            "condition_identity": masked_identity, # Masked Bald Images for Identity Net
             "prompt": self.prompt,
             "original_size": (self.size, self.size),
             "crops_coords_top_left": (0, 0),
@@ -275,11 +278,14 @@ def main():
     unet.requires_grad_(False)
     
     # 2. ControlNets
-    # Initialize from UNet weights for faster convergence
-    print("Initializing ControlNet A (Geometry)...")
-    controlnet_a = ControlNetModel.from_unet(unet)
-    print("Initializing ControlNet B (Identity)...")
-    controlnet_b = ControlNetModel.from_unet(unet)
+    # [V4 Philosophy] Hybrid Dual-Stream
+    # Stream A: Geometry (Pixel Space, 1ch)
+    # Stream B: Identity (Latent Space, 4ch)
+    print("Initializing ControlNet A (Geometry, 1ch)...")
+    controlnet_a = ControlNetModel.from_unet(unet, conditioning_channels=1)
+    
+    print("Initializing ControlNet B (Identity, 4ch Latent)...")
+    controlnet_b = LatentIdentityNet.from_unet(unet, conditioning_channels=4)
     
     # Train ControlNets
     controlnet_a.train()
@@ -438,6 +444,7 @@ def main():
                     "time_ids": add_time_ids,
                 }
                 
+                # Geometry Forward (Pixel Space 1ch)
                 down_block_res_samples_a, mid_block_res_sample_a = controlnet_a(
                     noisy_latents,
                     timesteps,
@@ -447,12 +454,18 @@ def main():
                     return_dict=False,
                 )
                 
+                # Identity Forward (Latent Space 4ch)
+                # [V4 Philosophy] Encode Masked Identity to Latents first
+                with torch.no_grad():
+                    cond_id_latents = vae.encode(cond_id).latent_dist.sample()
+                    cond_id_latents = cond_id_latents * vae.config.scaling_factor
+
                 down_block_res_samples_b, mid_block_res_sample_b = controlnet_b(
                     noisy_latents,
                     timesteps,
                     encoder_hidden_states=prompt_embeds,
                     added_cond_kwargs=added_cond_kwargs,
-                    controlnet_cond=cond_id,
+                    controlnet_cond=cond_id_latents,
                     return_dict=False,
                 )
                 
