@@ -264,30 +264,82 @@ def main():
     vae = AutoencoderKL.from_pretrained(args.vae_model_name_or_path, torch_dtype=weight_dtype)
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", variant="fp16" if weight_dtype==torch.float16 else None, torch_dtype=weight_dtype)
     
-    # 2. ControlNets
-    # Initialize from UNet weights for faster convergence (Standard Practice)
-    # Using MultiControlNet: List of models
-    print("Initializing ControlNet A (Geometry)...")
-    controlnet_a = ControlNetModel.from_unet(unet)
-    print("Initializing ControlNet B (Identity)...")
-    controlnet_b = ControlNetModel.from_unet(unet)
-    
     # Freeze base models
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
-    
 
+    # Cast frozen models temporarily to device for caching
+    # We will move them to GPU, compute cache, then delete them to save VRAM.
+    print("⏳ Moving VAE and Text Encoders to GPU for caching...")
+    vae.to(accelerator.device, dtype=weight_dtype)
+    text_encoder.to(accelerator.device, dtype=weight_dtype)
+    text_encoder_2.to(accelerator.device, dtype=weight_dtype)
+
+    # Dataset for caching
+    dataset = HairlineDataset(
+        orig_dir=args.orig_dir,
+        bald_dir=args.bald_dir,
+        mask_dir=args.mask_dir,
+        tokenizer=tokenizer,
+        tokenizer_2=tokenizer_2,
+        size=args.resolution
+    )
     
-    # Train ControlNets
-    controlnet_a.train()
-    controlnet_b.train()
+    # Pre-computation / Caching Loop
+    print(f"⏳ Pre-computing latents and embeddings for {len(dataset)} samples...")
+    cached_data = []
+    
+    for idx in tqdm(range(len(dataset)), desc="Caching"):
+        sample = dataset[idx]
+        with torch.no_grad():
+            # 1. Latents
+            pixel_values = sample["pixel_values"].unsqueeze(0).to(device=accelerator.device, dtype=weight_dtype)
+            latents = vae.encode(pixel_values).latent_dist.sample()
+            latents = latents * vae.config.scaling_factor
+            
+            # 2. Text Embeddings
+            prompt_embeds, pooled_prompt_embeds = compute_embeddings(
+                [sample["prompt"]], 
+                args.proportion_empty_prompts, # Note: this is static now. ideally we cache both valid and empty? 
+                # For simplicity in this script, we will just cache the valid prompt. 
+                # Dropout usually happens at training time. 
+                # BUT since we delete text encoder, we must decide now.
+                # Standard practice: cache both or drop linearly. 
+                # Let's simple use 0.0 dropout here and handle dropout by ZEROING the tensor during training if needed (complex).
+                # To keep it simple for this fix: We disable dropout for cached embeddings.
+                text_encoder, text_encoder_2, tokenizer, tokenizer_2
+            )
+            prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
+            pooled_prompt_embeds = pooled_prompt_embeds.to(dtype=weight_dtype)
+            
+            # 3. Conditions (Keep on CPU, move to GPU in loop)
+            cached_data.append({
+                "latents": latents.cpu(),
+                "prompt_embeds": prompt_embeds.cpu(),
+                "pooled_prompt_embeds": pooled_prompt_embeds.cpu(),
+                "condition_geometry": sample["condition_geometry"],
+                "condition_identity": sample["condition_identity"],
+                "original_size": sample["original_size"],
+                "crops_coords_top_left": sample["crops_coords_top_left"],
+                "target_size": sample["target_size"],
+            })
+
+    print("✅ Caching complete. Unloading VAE and Text Encoders...")
+    del vae, text_encoder, text_encoder_2
+    torch.cuda.empty_cache()
+    
+    # 2. ControlNets
+    print("Initializing ControlNet A (Geometry)...")
+    controlnet_a = ControlNetModel.from_unet(unet)
+    print("Initializing ControlNet B (Identity)...")
+    controlnet_b = ControlNetModel.from_unet(unet)
     
     # Enable Gradient Checkpointing
     controlnet_a.enable_gradient_checkpointing()
     controlnet_b.enable_gradient_checkpointing()
-    unet.enable_gradient_checkpointing() # For memory saving on frozen model too
+    unet.enable_gradient_checkpointing() 
 
     # Enable Xformers (Crucial for SDXL on <48GB VRAM)
     if is_xformers_available():
@@ -305,13 +357,7 @@ def main():
         print("⚠️ Xformers not available. Expect high VRAM usage.")
 
     if args.mixed_precision == "fp16":
-        # Cast frozen models to fp16
-        vae.to(dtype=weight_dtype)
-        text_encoder.to(dtype=weight_dtype)
-        text_encoder_2.to(dtype=weight_dtype)
         unet.to(dtype=weight_dtype)
-
-
 
     # Optimizer: Use 8-bit AdamW to save VRAM (Crucial for SDXL)
     try:
@@ -330,20 +376,44 @@ def main():
         weight_decay=1e-2,
         eps=1e-08,
     )
+    
+    # Prepare ControlNets with Accelerator
+    # Note: We need a custom DataLoader for cached data
+    
+    class CachedDataset(torch.utils.data.Dataset):
+        def __init__(self, data):
+            self.data = data
+        def __len__(self):
+            return len(self.data)
+        def __getitem__(self, idx):
+            return self.data[idx]
 
-    # Dataset & Dataloader
-    dataset = HairlineDataset(
-        orig_dir=args.orig_dir,
-        bald_dir=args.bald_dir,
-        mask_dir=args.mask_dir,
-        tokenizer=tokenizer,
-        tokenizer_2=tokenizer_2,
-        size=args.resolution
-    )
+    # Custom Collate for Cached Data
+    def cached_collate_fn(examples):
+        latents = torch.stack([ex["latents"][0] for ex in examples]) # latents were [1, 4, 128, 128]
+        prompt_embeds = torch.stack([ex["prompt_embeds"][0] for ex in examples])
+        pooled_prompt_embeds = torch.stack([ex["pooled_prompt_embeds"][0] for ex in examples])
+        condition_geometry = torch.stack([ex["condition_geometry"] for ex in examples])
+        condition_identity = torch.stack([ex["condition_identity"] for ex in examples])
+        original_sizes = [ex["original_size"] for ex in examples]
+        crop_coords = [ex["crops_coords_top_left"] for ex in examples]
+        target_sizes = [ex["target_size"] for ex in examples]
+        
+        return {
+            "latents": latents,
+            "prompt_embeds": prompt_embeds,
+            "pooled_prompt_embeds": pooled_prompt_embeds,
+            "condition_geometry": condition_geometry,
+            "condition_identity": condition_identity,
+            "original_sizes": original_sizes,
+            "crop_coords": crop_coords,
+            "target_sizes": target_sizes,
+        }
+
     train_dataloader = torch.utils.data.DataLoader(
-        dataset,
+        CachedDataset(cached_data),
         shuffle=True,
-        collate_fn=collate_fn,
+        collate_fn=cached_collate_fn,
         batch_size=args.train_batch_size,
         num_workers=4,
     )
@@ -351,15 +421,11 @@ def main():
     # Scheduler
     noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
 
-    # Prepare with Accelerator
     controlnet_a, controlnet_b, optimizer, train_dataloader = accelerator.prepare(
         controlnet_a, controlnet_b, optimizer, train_dataloader
     )
     
-    # Move frozen components
-    vae.to(accelerator.device)
-    text_encoder.to(accelerator.device)
-    text_encoder_2.to(accelerator.device)
+    # Move UNet
     unet.to(accelerator.device)
 
     # Training Loop
@@ -373,15 +439,12 @@ def main():
     for epoch in range(args.num_train_epochs):
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet_a, controlnet_b):
-                # 1. Encode Condition Images
-                # Geometry (Mask) -> Pixel values (already matching resolution)
-                # Identity (Bald) -> Pixel values
+                # 1. Load Cached Inputs
+                latents = batch["latents"].to(dtype=weight_dtype, device=accelerator.device)
+                prompt_embeds = batch["prompt_embeds"].to(dtype=weight_dtype, device=accelerator.device)
+                pooled_prompt_embeds = batch["pooled_prompt_embeds"].to(dtype=weight_dtype, device=accelerator.device)
                 cond_geo = batch["condition_geometry"].to(dtype=weight_dtype, device=accelerator.device)
                 cond_id = batch["condition_identity"].to(dtype=weight_dtype, device=accelerator.device)
-                
-                # 2. Encode Latents
-                latents = vae.encode(batch["pixel_values"].to(dtype=weight_dtype, device=accelerator.device)).latent_dist.sample()
-                latents = latents * vae.config.scaling_factor
                 
                 # 3. Sample Noise
                 noise = torch.randn_like(latents)
@@ -391,24 +454,12 @@ def main():
                 # 4. Add Noise
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
                 
-                # 5. Get Text Embeddings
-                prompt_embeds, pooled_prompt_embeds = compute_embeddings(
-                    batch["prompt"], 
-                    args.proportion_empty_prompts,
-                    text_encoder, text_encoder_2, tokenizer, tokenizer_2
-                )
-                prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
-                pooled_prompt_embeds = pooled_prompt_embeds.to(dtype=weight_dtype)
-                
                 # 6. Prepare Time IDs (Micro-Conditioning)
                 add_time_ids = torch.cat(
                     [compute_time_ids(s, c, t, accelerator.device, weight_dtype) for s, c, t in zip(batch["original_sizes"], batch["crop_coords"], batch["target_sizes"])]
                 )
                 
                 # 7. ControlNet Forward
-                # SDXL ControlNet: input=(noisy_latents, timesteps, encoder_hidden_states, controlnet_cond, added_cond_kwargs)
-                # We have 2 ControlNets.
-                
                 added_cond_kwargs = {
                     "text_embeds": pooled_prompt_embeds,
                     "time_ids": add_time_ids,
@@ -448,8 +499,6 @@ def main():
                 )[0]
                 
                 # 9. Loss
-                # SDXL default prediction type is epsilon usually
-                # But check scheduler config? default is usually epsilon
                 if noise_scheduler.config.prediction_type == "epsilon":
                     target = noise
                 elif noise_scheduler.config.prediction_type == "v_prediction":
