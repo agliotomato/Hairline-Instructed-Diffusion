@@ -274,6 +274,13 @@ def main():
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
     
+    # 2. ControlNets
+    # Initialize from UNet weights for faster convergence
+    print("Initializing ControlNet A (Geometry)...")
+    controlnet_a = ControlNetModel.from_unet(unet)
+    print("Initializing ControlNet B (Identity)...")
+    controlnet_b = ControlNetModel.from_unet(unet)
+    
     # Train ControlNets
     controlnet_a.train()
     controlnet_b.train()
