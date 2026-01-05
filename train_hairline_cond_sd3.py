@@ -202,6 +202,12 @@ def main():
     if accelerator.is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
 
+    weight_dtype = torch.float32
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+
     # Use Pipeline to handle model loading & prompt encoding logic cleanly
     pipeline = StableDiffusion3Pipeline.from_pretrained(
         args.pretrained_model_name_or_path,
@@ -355,12 +361,8 @@ def main():
     controlnet_a, controlnet_b, optimizer, train_dataloader = accelerator.prepare(
         controlnet_a, controlnet_b, optimizer, train_dataloader
     )
-
-    weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
-        weight_dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
+    
+    # weight_dtype logic moved to top
         
     # Move pipeline components to device
     pipeline.set_progress_bar_config(disable=True)
