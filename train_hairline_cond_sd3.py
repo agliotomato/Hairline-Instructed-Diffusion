@@ -221,12 +221,15 @@ def main():
     pipeline.text_encoder_3.requires_grad_(False)
     
     # Initialize ControlNets
+    # Initialize ControlNets (Hybrid Strategy)
+    # ControlNet A (Geometry): Takes simple mask (1ch) resized to latent dims -> extra_conditioning_channels=1 (Default)
+    # ControlNet B (Identity): Takes VAE encoded latents (16ch) for texture -> extra_conditioning_channels=16
     if accelerator.is_main_process:
-        print("Initializing ControlNet A (Geometry)...")
-    controlnet_a = SD3ControlNetModel.from_transformer(transformer)
+        print("Initializing ControlNet A (Geometry, 1ch input)...")
+    controlnet_a = SD3ControlNetModel.from_transformer(transformer, extra_conditioning_channels=1) 
     if accelerator.is_main_process:
-        print("Initializing ControlNet B (Identity)...")
-    controlnet_b = SD3ControlNetModel.from_transformer(transformer)
+        print("Initializing ControlNet B (Identity, 16ch input)...")
+    controlnet_b = SD3ControlNetModel.from_transformer(transformer, extra_conditioning_channels=16)
     
     controlnet_a.requires_grad_(True)
     controlnet_b.requires_grad_(True)
@@ -300,10 +303,11 @@ def main():
                 with torch.no_grad():
                     latents = vae.encode(pixel_values).latent_dist.sample() * vae.config.scaling_factor
                     
-                    # Encode Masks (Geometry Stream)
+                    # Prepare Masks (Geometry Stream - Non-VAE)
+                    # Resize mask to latent resolution (H/8, W/8)
                     mask = batch["hair_mask"].to(device=accelerator.device, dtype=weight_dtype)
-                    mask_3ch = mask.repeat(1, 3, 1, 1) # 1ch -> 3ch RGB
-                    mask_latents = vae.encode(mask_3ch).latent_dist.sample() * vae.config.scaling_factor
+                    mask_cond = torch.nn.functional.interpolate(mask, size=latents.shape[-2:], mode="nearest")
+                    # mask_cond is now [Batch, 1, 128, 128]
                     
                     # Encode Identity
                     masked_bald = batch["masked_bald_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
@@ -329,24 +333,24 @@ def main():
                 # SD3 uses v-prediction typically.
                 target = noise - latents 
 
-                # 4. Forward ControlNets
-                # Stream A
+                # 4. Forward ControlNets (Hybrid)
+                # Stream A (Geometry, 1ch mask)
                 out_a = controlnet_a(
                     hidden_states=noisy_latents,
                     timestep=timesteps,
                     encoder_hidden_states=prompt_embeds,
                     pooled_projections=pooled_prompt_embeds,
-                    controlnet_cond=mask_latents,
+                    controlnet_cond=mask_cond, # 1ch resized mask
                     return_dict=False
                 )
                 
-                # Stream B
+                # Stream B (Identity, 16ch latents)
                 out_b = controlnet_b(
                     hidden_states=noisy_latents,
                     timestep=timesteps,
                     encoder_hidden_states=prompt_embeds,
                     pooled_projections=pooled_prompt_embeds,
-                    controlnet_cond=identity_latents,
+                    controlnet_cond=identity_latents, # 16ch VAE latents
                     return_dict=False
                 )
                 
