@@ -301,12 +301,7 @@ def main():
         text_encoder_2.to(dtype=weight_dtype)
         unet.to(dtype=weight_dtype)
 
-    # Cast GroupNorm/LayerNorm to fp32 for stability and to avoid "mixed dtype" errors
-    # This must be done AFTER any global casting to fp16
-    if args.mixed_precision == "fp16":
-        for name, module in unet.named_modules():
-            if isinstance(module, (torch.nn.GroupNorm, torch.nn.LayerNorm)):
-                module.float()
+
 
     # Optimizer
     params_to_optimize = list(controlnet_a.parameters()) + list(controlnet_b.parameters())
