@@ -229,6 +229,15 @@ def main():
 
     args = parser.parse_args()
     
+    # --- CUDA Check ---
+    if not torch.cuda.is_available():
+        raise RuntimeError("❌ CUDA is not available. This script requires a GPU.")
+    
+    print(f"DEBUG: CUDA Available: {torch.cuda.is_available()}")
+    print(f"DEBUG: Current Device Index: {torch.cuda.current_device()}")
+    print(f"DEBUG: Device Name: {torch.cuda.get_device_name(0)}")
+    # ------------------
+    
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir)
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -236,7 +245,13 @@ def main():
         log_with="tensorboard",
         project_config=accelerator_project_config,
     )
-
+    
+    print(f"DEBUG: Accelerator Device: {accelerator.device}")
+    if accelerator.device.type != 'cuda':
+        print("⚠️ Accelerator did not pick CUDA. Forcing CUDA...")
+        # Note: Accelerator usually handles this. If it fails, something deep is wrong.
+        # But we will rely on manual .to("cuda") if needed, though Accelerator.prepare handles placement.
+    
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
         weight_dtype = torch.float16
