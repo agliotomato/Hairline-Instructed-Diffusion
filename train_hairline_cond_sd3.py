@@ -289,6 +289,8 @@ def main():
                         negative_pooled_prompt_embeds,
                     ) = pipeline.encode_prompt(
                         prompt=batch["prompt"],
+                        prompt_2=None,
+                        prompt_3=None,
                         device=accelerator.device, # Use accelerator device
                         do_classifier_free_guidance=False 
                     )
