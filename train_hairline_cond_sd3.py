@@ -237,47 +237,82 @@ def main():
     # Usually easier to use Load & Update pattern or from_config.
     # Let's try safe approach: instantiate with same params as from_transformer would.
     
-    # Safe manual init:
-    controlnet_a = SD3ControlNetModel(
-        sample_size=transformer.config.sample_size,
-        patch_size=transformer.config.patch_size,
-        in_channels=transformer.config.in_channels,
-        num_layers=transformer.config.num_layers,
-        attention_head_dim=transformer.config.attention_head_dim,
-        num_attention_heads=transformer.config.num_attention_heads,
-        joint_attention_dim=transformer.config.joint_attention_dim,
-        caption_projection_dim=transformer.config.caption_projection_dim,
-        pooled_projection_dim=transformer.config.pooled_projection_dim,
-        out_channels=transformer.config.out_channels,
-        pos_embed_max_size=transformer.config.pos_embed_max_size, # Missing arg fixed
-        qk_norm=transformer.config.qk_norm,   # Missing arg fixed
-        dual_attention_layers=transformer.config.dual_attention_layers, # Missing arg fixed
-        extra_conditioning_channels=1, # <--- KEY CHANGE
-    )
-    # Load weights from transformer (Partial load)
-    # We can use controlnet_a.load_state_dict(transformer.state_dict(), strict=False) to transfer what matches.
-    controlnet_a.load_state_dict(transformer.state_dict(), strict=False)
+    # Initialize ControlNets (Hybrid Strategy)
+    # ControlNet A (Geometry, 1ch): SD3 Default matches (extra=1)
+    if accelerator.is_main_process:
+        print("Initializing ControlNet A (Geometry, 1ch input)...")
+    controlnet_a = SD3ControlNetModel.from_transformer(transformer)
+    controlnet_a.requires_grad_(True)
+    controlnet_a.train()
 
-    # 2. Identity (16ch)
+    # ControlNet B (Identity, 16ch): Need manual init for channels
     if accelerator.is_main_process:
         print("Initializing ControlNet B (Identity, 16ch input)...")
+    
+    # Config derived from inspect_sd3_config.py
+    # num_layers=12, dual_attention_layers=[0...12], etc.
     controlnet_b = SD3ControlNetModel(
-        sample_size=transformer.config.sample_size,
-        patch_size=transformer.config.patch_size,
-        in_channels=transformer.config.in_channels,
-        num_layers=transformer.config.num_layers,
-        attention_head_dim=transformer.config.attention_head_dim,
-        num_attention_heads=transformer.config.num_attention_heads,
-        joint_attention_dim=transformer.config.joint_attention_dim,
-        caption_projection_dim=transformer.config.caption_projection_dim,
-        pooled_projection_dim=transformer.config.pooled_projection_dim,
-        out_channels=transformer.config.out_channels,
-        pos_embed_max_size=transformer.config.pos_embed_max_size, # Missing arg fixed
-        qk_norm=transformer.config.qk_norm,   # Missing arg fixed
-        dual_attention_layers=transformer.config.dual_attention_layers, # Missing arg fixed
-        extra_conditioning_channels=16, # <--- KEY CHANGE
+        sample_size=128,
+        patch_size=2,
+        in_channels=16,
+        num_layers=12, # CONFIRMED
+        attention_head_dim=64,
+        num_attention_heads=24,
+        joint_attention_dim=4096,
+        caption_projection_dim=1536,
+        pooled_projection_dim=2048,
+        out_channels=16,
+        pos_embed_max_size=384,
+        qk_norm="rms_norm",
+        dual_attention_layers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], # CONFIRMED KEY
+        extra_conditioning_channels=16, # <--- 16 Channels for Latent Identity
     )
-    controlnet_b.load_state_dict(transformer.state_dict(), strict=False)
+    # Load weights from transformer
+    # Note: 'pos_embed_input' will fail to load due to channel mismatch (16 vs 1), which is EXPECTED.
+    # Other weights should match.
+    keys_to_ignore = ["pos_embed_input.weight"] 
+    # Actually load_state_dict with strict=False handles ignoring, but we expect size mismatch for pos_embed_input.
+    # We want to load everything ELSE.
+    
+    # Manually filter state dict to avoid "RuntimeError: size mismatch"
+    # The error before was: size mismatch for pos_embed_input.weight
+    # Wait, previous error was huge list of mismatches because num_layers was wrong (default 2 vs 12).
+    # Now num_layers=12 matches, so only pos_embed_input should mismatch.
+    try:
+        controlnet_b.load_state_dict(transformer.state_dict(), strict=False)
+    except RuntimeError as e:
+        # Ignore size mismatch for input embedding layer, as we changed channels
+        if "size mismatch" in str(e) and "pos_embed_input" in str(e):
+             print("Specific size mismatch in Identity Net (Expected due to channel change). Ignoring.")
+        else:
+             # If other errors, re-raise might be noisy, but let's trust strict=False usually doesn't raise for size mismatch?
+             # Actually strict=False DOES raise for size mismatch, only ignores missing keys.
+             # So we MUST filter the state dict.
+             pass
+
+    # Better loading strategy: Filter out incompatible keys
+    transformer_state_dict = transformer.state_dict()
+    # Remove keys that have shape mismatch (input embedding)
+    # ControlNet's pos_embed_input is new, Transformer doesn't have it? 
+    # SD3CN.from_transformer copies logic.
+    # Let's just use strict=False and catch the error if specific.
+    # Actually, modifying the dictionary before loading is safer.
+    
+    # Filter state dict
+    compatible_state_dict = {}
+    model_dict = controlnet_b.state_dict()
+    for k, v in transformer_state_dict.items():
+        if k in model_dict:
+            if v.shape == model_dict[k].shape:
+                compatible_state_dict[k] = v
+            else:
+                if accelerator.is_main_process:
+                    print(f"Skipping {k} due to shape mismatch: Trans{v.shape} vs CN{model_dict[k].shape}")
+    
+    controlnet_b.load_state_dict(compatible_state_dict, strict=False)
+    
+    controlnet_b.requires_grad_(True)
+    controlnet_b.train()
     
     controlnet_a.requires_grad_(True)
     controlnet_b.requires_grad_(True)
@@ -382,23 +417,29 @@ def main():
                 target = noise - latents 
 
                 # 4. Forward ControlNets (Hybrid)
-                # Stream A (Geometry, 1ch mask)
+                # Important: SD3ControlNet expects concatenated input (Noisy Latents + Condition)
+                
+                # Stream A (Geometry)
+                # Input: 16ch (Noisy) + 1ch (Mask) = 17ch
+                cond_a_input = torch.cat([noisy_latents, mask_cond], dim=1)
                 out_a = controlnet_a(
                     hidden_states=noisy_latents,
                     timestep=timesteps,
                     encoder_hidden_states=prompt_embeds,
                     pooled_projections=pooled_prompt_embeds,
-                    controlnet_cond=mask_cond, # 1ch resized mask
+                    controlnet_cond=cond_a_input, 
                     return_dict=False
                 )
                 
-                # Stream B (Identity, 16ch latents)
+                # Stream B (Identity)
+                # Input: 16ch (Noisy) + 16ch (Identity Latents) = 32ch
+                cond_b_input = torch.cat([noisy_latents, identity_latents], dim=1)
                 out_b = controlnet_b(
                     hidden_states=noisy_latents,
                     timestep=timesteps,
                     encoder_hidden_states=prompt_embeds,
                     pooled_projections=pooled_prompt_embeds,
-                    controlnet_cond=identity_latents, # 16ch VAE latents
+                    controlnet_cond=cond_b_input, 
                     return_dict=False
                 )
                 
