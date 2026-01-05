@@ -316,6 +316,15 @@ def main():
     
     controlnet_a.requires_grad_(True)
     controlnet_b.requires_grad_(True)
+    
+    # Enable Gradient Checkpointing for VRAM savings
+    controlnet_a.enable_gradient_checkpointing()
+    controlnet_b.enable_gradient_checkpointing()
+    # Also for transformer if we were training it, but we are freezing it.
+    # However, for ControlNet training, sometimes we need the gradient to flow through 
+    # (but not update) the base model? No, base model is frozen.
+    # Just checkpointing ControlNets is usually enough.
+
     controlnet_a.train()
     controlnet_b.train()
     
