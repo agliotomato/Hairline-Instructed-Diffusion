@@ -361,9 +361,15 @@ def main():
         controlnet_a, controlnet_b, optimizer, train_dataloader
     )
     
-    # Move pipeline components to device
-    pipeline.set_progress_bar_config(disable=True)
-    pipeline = pipeline.to(accelerator.device) 
+    # Move pipeline components to device - MODIFIED FOR VRAM SAVINGS
+    # pipeline = pipeline.to(accelerator.device) # DO NOT MOVE ALL AT ONCE
+    # Instead, we will move text encoders / vae on demand.
+    
+    # Ensure Transformer is on device (if we extracted it, it might still refer to pipeline's module)
+    # Actually, we extracted `transformer = pipeline.transformer`. 
+    # If pipeline is CPU, transformer is CPU. We must move transformer to GPU permanently.
+    pipeline.transformer.to(accelerator.device)
+    transformer.to(accelerator.device)
     
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     max_train_steps = args.max_train_steps or args.num_train_epochs * num_update_steps_per_epoch
@@ -375,6 +381,11 @@ def main():
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet_a, controlnet_b):
                 # 1. Text Encoding using Pipeline
+                # Move text encoders to GPU just for this operation
+                pipeline.text_encoder.to(accelerator.device)
+                pipeline.text_encoder_2.to(accelerator.device)
+                pipeline.text_encoder_3.to(accelerator.device)
+                
                 with torch.no_grad():
                     (
                         prompt_embeds,
@@ -390,8 +401,17 @@ def main():
                     )
                     prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
                     pooled_prompt_embeds = pooled_prompt_embeds.to(dtype=weight_dtype)
+                
+                # Move text encoders back to CPU immediately
+                pipeline.text_encoder.to("cpu")
+                pipeline.text_encoder_2.to("cpu")
+                pipeline.text_encoder_3.to("cpu")
+                torch.cuda.empty_cache()
                     
                 # 2. VAE Encode
+                # Move VAE to GPU just for this operation
+                vae.to(accelerator.device)
+                
                 pixel_values = batch["pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
                 with torch.no_grad():
                     latents = vae.encode(pixel_values).latent_dist.sample() * vae.config.scaling_factor
@@ -405,16 +425,14 @@ def main():
                     masked_bald = batch["masked_bald_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
                     identity_latents = vae.encode(masked_bald).latent_dist.sample() * vae.config.scaling_factor
 
+                # Move VAE back to CPU immediately
+                vae.to("cpu")
+                
                 # AGGRESSIVE CLEANUP: Free VRAM after encodings are done
-                # We can't delete pipeline yet if we loop? 
-                # Actually, encoding happens per batch. We can't delete text encoder if we need it next batch.
-                # However, we can aggressively empty cache.
                 torch.cuda.empty_cache()
 
                 # 3. Flow Matching Noise
                 noise = torch.randn_like(latents)
-                bsz = latents.shape[0]
-                timesteps = torch.randint(0, scheduler.config.num_train_timesteps, (bsz,), device=latents.device).long()
                 
                 # Add noise
                 # Sigmas indexing (timesteps=GPU, sigmas=CPU)
