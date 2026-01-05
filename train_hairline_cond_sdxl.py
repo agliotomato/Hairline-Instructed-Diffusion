@@ -246,11 +246,6 @@ def main():
         project_config=accelerator_project_config,
     )
     
-    print(f"DEBUG: Accelerator Device: {accelerator.device}")
-    if accelerator.device.type != 'cuda':
-        print("⚠️ Accelerator did not pick CUDA. Forcing CUDA...")
-        # Note: Accelerator usually handles this. If it fails, something deep is wrong.
-        # But we will rely on manual .to("cuda") if needed, though Accelerator.prepare handles placement.
     
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
@@ -414,9 +409,9 @@ def main():
                     return_dict=False,
                 )
                 
-                # Merge Residuals (Simple Sum)
-                down_block_res_samples = [a + b for a, b in zip(down_block_res_samples_a, down_block_res_samples_b)]
-                mid_block_res_sample = mid_block_res_sample_a + mid_block_res_sample_b
+                # Merge Residuals (Simple Sum) and Cast to weight_dtype
+                down_block_res_samples = [ (a + b).to(dtype=weight_dtype) for a, b in zip(down_block_res_samples_a, down_block_res_samples_b) ]
+                mid_block_res_sample = (mid_block_res_sample_a + mid_block_res_sample_b).to(dtype=weight_dtype)
                 
                 # 8. UNet Forward
                 model_pred = unet(
