@@ -493,6 +493,15 @@ def main():
                     # VRAM OPTIMIZATION: Move Transformer to GPU ON-DEMAND
                     transformer.to(accelerator.device)
                     
+                    # DEBUG: Check devices
+                    if accelerator.is_main_process:
+                         print(f"DEBUG: noisy_latents device: {noisy_latents.device}")
+                         print(f"DEBUG: timesteps device: {timesteps.device}")
+                         print(f"DEBUG: prompt_embeds device: {prompt_embeds.device}")
+                         print(f"DEBUG: pooled_prompt_embeds device: {pooled_prompt_embeds.device}")
+                         print(f"DEBUG: residuals device: {combined_residuals[0].device if combined_residuals else 'None'}")
+                         print(f"DEBUG: transformer device: {transformer.device if hasattr(transformer, 'device') else 'Unknown'}")
+
                     model_pred = transformer(
                         hidden_states=noisy_latents,
                         timestep=timesteps,
