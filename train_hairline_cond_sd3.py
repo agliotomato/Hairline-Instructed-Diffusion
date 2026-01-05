@@ -433,6 +433,8 @@ def main():
 
                 # 3. Flow Matching Noise
                 noise = torch.randn_like(latents)
+                bsz = latents.shape[0]
+                timesteps = torch.randint(0, scheduler.config.num_train_timesteps, (bsz,), device=latents.device).long()
                 
                 # Add noise
                 # Sigmas indexing (timesteps=GPU, sigmas=CPU)
