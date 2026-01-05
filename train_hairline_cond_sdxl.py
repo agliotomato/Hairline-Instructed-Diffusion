@@ -312,10 +312,17 @@ def main():
         text_encoder_2.to(dtype=weight_dtype)
         unet.to(dtype=weight_dtype)
 
-    # Optimizer: Use Standard AdamW for best quality/stability at 512px
-    print("✅ Using Standard AdamW optimizer for maximum stability.")
+    # Optimizer: Use 8-bit AdamW to save VRAM (Crucial even at 512px for 2 ControlNets)
+    try:
+        import bitsandbytes as bnb
+        optimizer_class = bnb.optim.AdamW8bit
+        print("✅ Using 8-bit AdamW optimizer (bitsandbytes) to fit in VRAM.")
+    except ImportError:
+        optimizer_class = torch.optim.AdamW
+        print("⚠️ bitsandbytes not found. Using standard AdamW (High VRAM risk).")
+
     params_to_optimize = list(controlnet_a.parameters()) + list(controlnet_b.parameters())
-    optimizer = torch.optim.AdamW(
+    optimizer = optimizer_class(
         params_to_optimize,
         lr=args.learning_rate,
         betas=(0.9, 0.999),
