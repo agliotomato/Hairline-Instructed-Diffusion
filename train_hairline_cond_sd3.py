@@ -237,27 +237,12 @@ def main():
     # Usually easier to use Load & Update pattern or from_config.
     # Let's try safe approach: instantiate with same params as from_transformer would.
     
-    # Better approach:
-    controlnet_a = SD3ControlNetModel.from_transformer(transformer)
-    # The above creates 17ch (16+1). We need 1ch (0+1? No, 1ch total). 
-    # Wait, extra_conditioning_channels adds to VAE channels?
-    # SD3CN in_channels = transformer.in_channels (16) + extra (default 0? No default 1?)
-    # Default 'extra_cond_channels' is 0 in init, but maybe from_transformer sets it?
-    # Let's look at the source or just init from scratch.
-    
-    controlnet_a = SD3ControlNetModel(
-        **transformer.config, 
-        extra_conditioning_channels=1 # 1 channel mask
-    )
-    # But wait, SD3ControlNetModel might need specific args removed from transformer config.
-    # Let's rely on load_config if possible, or just hack the attribute after init? No, shape mismatch.
-    
     # Safe manual init:
     controlnet_a = SD3ControlNetModel(
         sample_size=transformer.config.sample_size,
         patch_size=transformer.config.patch_size,
         in_channels=transformer.config.in_channels,
-        num_layers=transformer.config.num_layers, # CN might use fewer layers, but usually matches for full copy
+        num_layers=transformer.config.num_layers,
         attention_head_dim=transformer.config.attention_head_dim,
         num_attention_heads=transformer.config.num_attention_heads,
         joint_attention_dim=transformer.config.joint_attention_dim,
