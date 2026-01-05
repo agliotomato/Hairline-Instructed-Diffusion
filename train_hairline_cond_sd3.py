@@ -318,9 +318,10 @@ def main():
                 # Sigmas indexing (timesteps=GPU, sigmas=CPU)
                 # Fix: Move timesteps to CPU for indexing, or move sigmas to GPU
                 sigmas = scheduler.sigmas[timesteps.cpu()].to(device=latents.device).flatten()
-                # SD3 Rectified Flow: z_t = (1-t)x + t*noise ? Or other way?
-                # Using scheduler.add_noise ensures consistency
-                noisy_latents = scheduler.add_noise(latents, noise, timesteps)
+                # SD3 Rectified Flow: z_t = (1-t)x + t*noise
+                # Manual implementation since scheduler.add_noise is missing
+                sigmas = sigmas.view(-1, 1, 1, 1)
+                noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
                 
                 # Target for Velocity (Rectified Flow)
                 # v = noise - latents (usually)
