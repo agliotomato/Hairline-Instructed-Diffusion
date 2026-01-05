@@ -430,7 +430,9 @@ def main():
                 
                 # Stream A (Geometry)
                 # Input: 16ch (Noisy) + 1ch (Mask) = 17ch
-                cond_a_input = torch.cat([noisy_latents, mask_cond], dim=1)
+                # Ensure all inputs are compatible with mixed precision (fp16)
+                noisy_latents = noisy_latents.to(dtype=weight_dtype)
+                cond_a_input = torch.cat([noisy_latents, mask_cond], dim=1).to(dtype=weight_dtype)
                 out_a = controlnet_a(
                     hidden_states=noisy_latents,
                     timestep=timesteps,
@@ -442,7 +444,7 @@ def main():
                 
                 # Stream B (Identity)
                 # Input: 16ch (Noisy) + 16ch (Identity Latents) = 32ch
-                cond_b_input = torch.cat([noisy_latents, identity_latents], dim=1)
+                cond_b_input = torch.cat([noisy_latents, identity_latents], dim=1).to(dtype=weight_dtype)
                 out_b = controlnet_b(
                     hidden_states=noisy_latents,
                     timestep=timesteps,
