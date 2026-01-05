@@ -1,6 +1,7 @@
 import argparse
 import os
 import torch
+import datetime
 from PIL import Image
 from diffusers import (
     ControlNetModel,
@@ -27,7 +28,7 @@ def main():
     parser.add_argument("--controlnet_scales", type=float, nargs="+", default=[1.0, 1.0])
     parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output_path", type=str, default="output_sdxl_inference.png")
+    parser.add_argument("--output_path", type=str, default="results", help="Output directory to save images")
     
     args = parser.parse_args()
 
@@ -78,8 +79,14 @@ def main():
     ).images[0]
 
     # 4. Save
-    image.save(args.output_path)
-    print(f"✅ Image saved to {args.output_path}")
+    if not os.path.exists(args.output_path):
+        os.makedirs(args.output_path)
+    
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_filename = os.path.join(args.output_path, f"sdxl_{timestamp}.png")
+        
+    image.save(final_filename)
+    print(f"✅ Image saved to {final_filename}")
 
 if __name__ == "__main__":
     main()
