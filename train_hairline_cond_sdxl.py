@@ -236,6 +236,10 @@ def main():
     print(f"DEBUG: CUDA Available: {torch.cuda.is_available()}")
     print(f"DEBUG: Current Device Index: {torch.cuda.current_device()}")
     print(f"DEBUG: Device Name: {torch.cuda.get_device_name(0)}")
+    
+    # Enable TF32 for faster training on Ampere GPUs
+    torch.backends.cuda.matmul.allow_tf32 = True
+    print("✅ TF32 enabled.")
     # ------------------
     
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir)
@@ -328,7 +332,12 @@ def main():
 
     print("✅ Caching complete. Unloading VAE and Text Encoders...")
     del vae, text_encoder, text_encoder_2
+    
+    # Force Garbage Collection
+    import gc
+    gc.collect()
     torch.cuda.empty_cache()
+    print(f"DEBUG: VRAM after unload: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
     
     # 2. ControlNets
     print("Initializing ControlNet A (Geometry)...")
@@ -510,7 +519,7 @@ def main():
                 
                 accelerator.backward(loss)
                 optimizer.step()
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 
             if accelerator.sync_gradients:
                 progress_bar.update(1)
