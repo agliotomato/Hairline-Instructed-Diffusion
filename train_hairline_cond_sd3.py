@@ -249,6 +249,9 @@ def main():
         caption_projection_dim=transformer.config.caption_projection_dim,
         pooled_projection_dim=transformer.config.pooled_projection_dim,
         out_channels=transformer.config.out_channels,
+        pos_embed_max_size=transformer.config.pos_embed_max_size, # Missing arg fixed
+        qk_norm=transformer.config.qk_norm,   # Missing arg fixed
+        dual_attention_layers=transformer.config.dual_attention_layers, # Missing arg fixed
         extra_conditioning_channels=1, # <--- KEY CHANGE
     )
     # Load weights from transformer (Partial load)
@@ -269,6 +272,9 @@ def main():
         caption_projection_dim=transformer.config.caption_projection_dim,
         pooled_projection_dim=transformer.config.pooled_projection_dim,
         out_channels=transformer.config.out_channels,
+        pos_embed_max_size=transformer.config.pos_embed_max_size, # Missing arg fixed
+        qk_norm=transformer.config.qk_norm,   # Missing arg fixed
+        dual_attention_layers=transformer.config.dual_attention_layers, # Missing arg fixed
         extra_conditioning_channels=16, # <--- KEY CHANGE
     )
     controlnet_b.load_state_dict(transformer.state_dict(), strict=False)
