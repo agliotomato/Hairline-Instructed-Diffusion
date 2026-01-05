@@ -109,7 +109,30 @@ class HairlineDataset(torch.utils.data.Dataset):
         self.tokenizer_2 = tokenizer_2
         self.size = size
         
-        self.images = sorted([f for f in self.orig_dir.glob('*') if f.suffix.lower() in ['.jpg', '.png', '.jpeg']])
+        self.images = []
+        all_images = sorted([f for f in self.orig_dir.glob('*') if f.suffix.lower() in ['.jpg', '.png', '.jpeg']])
+        
+        # Filter images that exist in all directories
+        print(f"Filtering dataset... Found {len(all_images)} candidates.")
+        valid_count = 0
+        for img_path in all_images:
+            name = img_path.stem
+            
+            # Check Bald
+            bald_path = self._find_file(self.bald_dir, name)
+            
+            # Check Mask
+            mask_path = self._find_file(self.mask_dir, name)
+            
+            if bald_path and mask_path:
+                self.images.append({
+                    "orig": img_path,
+                    "bald": bald_path,
+                    "mask": mask_path
+                })
+                valid_count += 1
+        
+        print(f"Dataset filtered. Keeping {valid_count}/{len(all_images)} valid samples.")
         
         # Default prompt
         self.prompt = "a photo of a person with realistic hairstyle" 
@@ -126,25 +149,27 @@ class HairlineDataset(torch.utils.data.Dataset):
             transforms.ToTensor(), # [0, 1]
         ])
 
+    def _find_file(self, directory, name):
+        for ext in ['.png', '.jpg', '.jpeg']:
+            path = directory / f"{name}{ext}"
+            if path.exists():
+                return path
+        return None
+
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        img_path = self.images[idx]
-        name = img_path.stem
+        item = self.images[idx]
         
         # Load Target Image (Original with Hair)
-        image = Image.open(img_path).convert("RGB")
+        image = Image.open(item["orig"]).convert("RGB")
         
         # Load Bald Image (Identity)
-        bald_path = self.bald_dir / f"{name}.png" 
-        if not bald_path.exists():
-             bald_path = self.bald_dir / f"{name}.jpg"
-        bald_image = Image.open(bald_path).convert("RGB")
+        bald_image = Image.open(item["bald"]).convert("RGB")
         
         # Load Mask (Geometry)
-        mask_path = self.mask_dir / f"{name}.png"
-        mask_image = Image.open(mask_path).convert("RGB") # Use RGB for 3ch input compatibility
+        mask_image = Image.open(item["mask"]).convert("RGB") # Use RGB for 3ch input compatibility
 
         # Transform
         pixel_values = self.transform_image(image)
