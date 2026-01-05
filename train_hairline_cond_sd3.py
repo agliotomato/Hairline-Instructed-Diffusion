@@ -222,14 +222,71 @@ def main():
     
     # Initialize ControlNets
     # Initialize ControlNets (Hybrid Strategy)
-    # ControlNet A (Geometry): Takes simple mask (1ch) resized to latent dims -> extra_conditioning_channels=1 (Default)
-    # ControlNet B (Identity): Takes VAE encoded latents (16ch) for texture -> extra_conditioning_channels=16
+    # Workaround: from_transformer doesn't accept kwargs for channels in this version.
+    # Manual initialization using config copy.
+    
+    # 1. Geometry (1ch)
     if accelerator.is_main_process:
         print("Initializing ControlNet A (Geometry, 1ch input)...")
-    controlnet_a = SD3ControlNetModel.from_transformer(transformer, extra_conditioning_channels=1) 
+    config_a = dict(transformer.config)
+    config_a["extra_conditioning_channels"] = 1
+    # SD3CN uses 'num_layers' which might differ from transformer 'num_layers' if not careful,
+    # but from_transformer logic usually just copies. 
+    # Let's trust that SD3ControlNetModel(**config_a) works if config matches.
+    # We need to filter keys that are in Transformer but not ControlNet? 
+    # Usually easier to use Load & Update pattern or from_config.
+    # Let's try safe approach: instantiate with same params as from_transformer would.
+    
+    # Better approach:
+    controlnet_a = SD3ControlNetModel.from_transformer(transformer)
+    # The above creates 17ch (16+1). We need 1ch (0+1? No, 1ch total). 
+    # Wait, extra_conditioning_channels adds to VAE channels?
+    # SD3CN in_channels = transformer.in_channels (16) + extra (default 0? No default 1?)
+    # Default 'extra_cond_channels' is 0 in init, but maybe from_transformer sets it?
+    # Let's look at the source or just init from scratch.
+    
+    controlnet_a = SD3ControlNetModel(
+        **transformer.config, 
+        extra_conditioning_channels=1 # 1 channel mask
+    )
+    # But wait, SD3ControlNetModel might need specific args removed from transformer config.
+    # Let's rely on load_config if possible, or just hack the attribute after init? No, shape mismatch.
+    
+    # Safe manual init:
+    controlnet_a = SD3ControlNetModel(
+        sample_size=transformer.config.sample_size,
+        patch_size=transformer.config.patch_size,
+        in_channels=transformer.config.in_channels,
+        num_layers=transformer.config.num_layers, # CN might use fewer layers, but usually matches for full copy
+        attention_head_dim=transformer.config.attention_head_dim,
+        num_attention_heads=transformer.config.num_attention_heads,
+        joint_attention_dim=transformer.config.joint_attention_dim,
+        caption_projection_dim=transformer.config.caption_projection_dim,
+        pooled_projection_dim=transformer.config.pooled_projection_dim,
+        out_channels=transformer.config.out_channels,
+        extra_conditioning_channels=1, # <--- KEY CHANGE
+    )
+    # Load weights from transformer (Partial load)
+    # We can use controlnet_a.load_state_dict(transformer.state_dict(), strict=False) to transfer what matches.
+    controlnet_a.load_state_dict(transformer.state_dict(), strict=False)
+
+    # 2. Identity (16ch)
     if accelerator.is_main_process:
         print("Initializing ControlNet B (Identity, 16ch input)...")
-    controlnet_b = SD3ControlNetModel.from_transformer(transformer, extra_conditioning_channels=16)
+    controlnet_b = SD3ControlNetModel(
+        sample_size=transformer.config.sample_size,
+        patch_size=transformer.config.patch_size,
+        in_channels=transformer.config.in_channels,
+        num_layers=transformer.config.num_layers,
+        attention_head_dim=transformer.config.attention_head_dim,
+        num_attention_heads=transformer.config.num_attention_heads,
+        joint_attention_dim=transformer.config.joint_attention_dim,
+        caption_projection_dim=transformer.config.caption_projection_dim,
+        pooled_projection_dim=transformer.config.pooled_projection_dim,
+        out_channels=transformer.config.out_channels,
+        extra_conditioning_channels=16, # <--- KEY CHANGE
+    )
+    controlnet_b.load_state_dict(transformer.state_dict(), strict=False)
     
     controlnet_a.requires_grad_(True)
     controlnet_b.requires_grad_(True)
