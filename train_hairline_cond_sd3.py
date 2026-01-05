@@ -367,9 +367,9 @@ def main():
     
     # Ensure Transformer is on device (if we extracted it, it might still refer to pipeline's module)
     # Actually, we extracted `transformer = pipeline.transformer`. 
-    # If pipeline is CPU, transformer is CPU. We must move transformer to GPU permanently.
-    pipeline.transformer.to(accelerator.device)
-    transformer.to(accelerator.device)
+    # VRAM FIX: Initialize Transformer on CPU. Only move to GPU when needed.
+    pipeline.transformer.to("cpu")
+    transformer.to("cpu")
     
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     max_train_steps = args.max_train_steps or args.num_train_epochs * num_update_steps_per_epoch
@@ -490,6 +490,9 @@ def main():
                     combined_residuals = [a + b for a, b in zip(residuals_a, residuals_b)]
                     
                     # 5. Transformer Forward
+                    # VRAM OPTIMIZATION: Move Transformer to GPU ON-DEMAND
+                    transformer.to(accelerator.device)
+                    
                     model_pred = transformer(
                         hidden_states=noisy_latents,
                         timestep=timesteps,
@@ -498,6 +501,12 @@ def main():
                         block_controlnet_hidden_states=combined_residuals,
                         return_dict=True
                     ).sample
+                    
+                    # Move Transformer BACK to CPU to save memory for next batch encoding
+                    # Note: Moving back and forth is slow, but necessary if OOM. 
+                    # If we can fit Transformer + T5, we don't need this. But A100 OOM suggests we can't.
+                    transformer.to("cpu")
+                    torch.cuda.empty_cache()
                 
                 # 6. Loss
                 # Weighting for Flow Matching?
