@@ -313,9 +313,17 @@ def main():
 
 
 
-    # Optimizer
+    # Optimizer: Use 8-bit AdamW to save VRAM (Crucial for SDXL)
+    try:
+        import bitsandbytes as bnb
+        optimizer_class = bnb.optim.AdamW8bit
+        print("✅ Using 8-bit AdamW optimizer (bitsandbytes).")
+    except ImportError:
+        optimizer_class = torch.optim.AdamW
+        print("⚠️ bitsandbytes not found. Using standard AdamW (Higher VRAM usage).")
+
     params_to_optimize = list(controlnet_a.parameters()) + list(controlnet_b.parameters())
-    optimizer = torch.optim.AdamW(
+    optimizer = optimizer_class(
         params_to_optimize,
         lr=args.learning_rate,
         betas=(0.9, 0.999),
