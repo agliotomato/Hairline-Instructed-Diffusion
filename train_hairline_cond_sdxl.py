@@ -225,8 +225,9 @@ def main():
     text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder", variant="fp16" if weight_dtype==torch.float16 else None)
     text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder_2", variant="fp16" if weight_dtype==torch.float16 else None)
     
-    vae = AutoencoderKL.from_pretrained(args.vae_model_name_or_path, variant="fp16" if weight_dtype==torch.float16 else None)
-    unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", variant="fp16" if weight_dtype==torch.float16 else None)
+    # VAE: Remove variant argument as the repo 'madebyollin/sdxl-vae-fp16-fix' implies the main file IS the fix
+    vae = AutoencoderKL.from_pretrained(args.vae_model_name_or_path, torch_dtype=weight_dtype)
+    unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", variant="fp16" if weight_dtype==torch.float16 else None, torch_dtype=weight_dtype)
     
     # 2. ControlNets
     # Initialize from UNet weights for faster convergence (Standard Practice)
