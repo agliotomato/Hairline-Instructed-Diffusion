@@ -421,15 +421,15 @@ def main():
                 # Sigmas indexing (timesteps=GPU, sigmas=CPU)
                 # Fix: Move timesteps to CPU for indexing, or move sigmas to GPU
                 sigmas = scheduler.sigmas[timesteps.cpu()].to(device=latents.device).flatten()
+                # Force sigmas to weight_dtype (fp16) to prevent promotion to float32
+                sigmas = sigmas.to(dtype=weight_dtype)
+
                 # SD3 Rectified Flow: z_t = (1-t)x + t*noise
                 # Manual implementation since scheduler.add_noise is missing
                 sigmas = sigmas.view(-1, 1, 1, 1)
                 noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
                 
                 # Target for Velocity (Rectified Flow)
-                # v = noise - latents (usually)
-                # Check paper or scheduler convention.
-                # SD3 uses v-prediction typically.
                 target = noise - latents 
 
                 # 4. Forward ControlNets (Hybrid)
@@ -437,46 +437,48 @@ def main():
                 
                 # Stream A (Geometry)
                 # Input: 16ch (Noisy) + 1ch (Mask) = 17ch
-                # Ensure all inputs are compatible with mixed precision (fp16)
                 noisy_latents = noisy_latents.to(dtype=weight_dtype)
                 cond_a_input = torch.cat([noisy_latents, mask_cond], dim=1).to(dtype=weight_dtype)
-                out_a = controlnet_a(
-                    hidden_states=noisy_latents,
-                    timestep=timesteps,
-                    encoder_hidden_states=prompt_embeds,
-                    pooled_projections=pooled_prompt_embeds,
-                    controlnet_cond=cond_a_input, 
-                    return_dict=False
-                )
                 
-                # Stream B (Identity)
-                # Input: 16ch (Noisy) + 16ch (Identity Latents) = 32ch
-                cond_b_input = torch.cat([noisy_latents, identity_latents], dim=1).to(dtype=weight_dtype)
-                out_b = controlnet_b(
-                    hidden_states=noisy_latents,
-                    timestep=timesteps,
-                    encoder_hidden_states=prompt_embeds,
-                    pooled_projections=pooled_prompt_embeds,
-                    controlnet_cond=cond_b_input, 
-                    return_dict=False
-                )
-                
-                # Merge Residuals
-                # out_a is tuple (residuals,)
-                residuals_a = out_a[0]
-                residuals_b = out_b[0]
-                
-                combined_residuals = [a + b for a, b in zip(residuals_a, residuals_b)]
-                
-                # 5. Transformer Forward
-                model_pred = transformer(
-                    hidden_states=noisy_latents,
-                    timestep=timesteps,
-                    encoder_hidden_states=prompt_embeds,
-                    pooled_projections=pooled_prompt_embeds,
-                    block_controlnet_hidden_states=combined_residuals,
-                    return_dict=True
-                ).sample
+                # Use autocast for safer mixed precision handling
+                with accelerator.autocast():
+                    out_a = controlnet_a(
+                        hidden_states=noisy_latents,
+                        timestep=timesteps,
+                        encoder_hidden_states=prompt_embeds,
+                        pooled_projections=pooled_prompt_embeds,
+                        controlnet_cond=cond_a_input, 
+                        return_dict=False
+                    )
+                    
+                    # Stream B (Identity)
+                    # Input: 16ch (Noisy) + 16ch (Identity Latents) = 32ch
+                    cond_b_input = torch.cat([noisy_latents, identity_latents], dim=1).to(dtype=weight_dtype)
+                    out_b = controlnet_b(
+                        hidden_states=noisy_latents,
+                        timestep=timesteps,
+                        encoder_hidden_states=prompt_embeds,
+                        pooled_projections=pooled_prompt_embeds,
+                        controlnet_cond=cond_b_input, 
+                        return_dict=False
+                    )
+                    
+                    # Merge Residuals
+                    # out_a is tuple (residuals,)
+                    residuals_a = out_a[0]
+                    residuals_b = out_b[0]
+                    
+                    combined_residuals = [a + b for a, b in zip(residuals_a, residuals_b)]
+                    
+                    # 5. Transformer Forward
+                    model_pred = transformer(
+                        hidden_states=noisy_latents,
+                        timestep=timesteps,
+                        encoder_hidden_states=prompt_embeds,
+                        pooled_projections=pooled_prompt_embeds,
+                        block_controlnet_hidden_states=combined_residuals,
+                        return_dict=True
+                    ).sample
                 
                 # 6. Loss
                 # Weighting for Flow Matching?
