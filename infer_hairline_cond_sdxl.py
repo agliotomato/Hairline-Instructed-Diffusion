@@ -16,8 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description="SDXL Hybrid ControlNet Inference")
     parser.add_argument("--pretrained_model_name_or_path", type=str, default="stabilityai/stable-diffusion-xl-base-1.0")
     parser.add_argument("--vae_model_name_or_path", type=str, default="madebyollin/sdxl-vae-fp16-fix")
-    parser.add_argument("--controlnet_a_path", type=str, required=True, help="Path to Geometry ControlNet")
-    parser.add_argument("--controlnet_b_path", type=str, required=True, help="Path to Identity ControlNet")
+    parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to checkpoint directory (containing model.safetensors)")
     parser.add_argument("--bald_path", type=str, required=True, help="Path to input bald image (used as base and condition)")
     parser.add_argument("--mask_path", type=str, required=True, help="Path to semantic mask")
     parser.add_argument("--prompt", type=str, default="high quality, realistic hairstyle, detailed hair, 8k")
@@ -37,10 +36,30 @@ def main():
 
     # 1. Load Models
     print("⏳ Loading Models...")
+    from diffusers import UNet2DConditionModel
+    from safetensors.torch import load_file
+
     vae = AutoencoderKL.from_pretrained(args.vae_model_name_or_path, torch_dtype=weight_dtype).to(device)
-    controlnet_a = ControlNetModel.from_pretrained(args.controlnet_a_path, torch_dtype=weight_dtype).to(device)
-    controlnet_b = ControlNetModel.from_pretrained(args.controlnet_b_path, torch_dtype=weight_dtype).to(device)
     
+    # Initialize ControlNets from UNet structure (matching training)
+    print("  - Initializing ControlNet structures from UNet...")
+    unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", torch_dtype=weight_dtype).to(device)
+    controlnet_a = ControlNetModel.from_unet(unet).to(device, dtype=weight_dtype)
+    controlnet_b = ControlNetModel.from_unet(unet).to(device, dtype=weight_dtype)
+    del unet # Free VRAM
+    
+    # Load Weights manually from Accelerator state
+    print(f"  - Loading weights from {args.checkpoint_path}...")
+    path_a = os.path.join(args.checkpoint_path, "model.safetensors")
+    path_b = os.path.join(args.checkpoint_path, "model_1.safetensors")
+    
+    if not os.path.exists(path_a) or not os.path.exists(path_b):
+        raise FileNotFoundError(f"Weights not found in {args.checkpoint_path}. Need model.safetensors and model_1.safetensors.")
+
+    controlnet_a.load_state_dict(load_file(path_a))
+    controlnet_b.load_state_dict(load_file(path_b))
+    
+    print("🚀 Models Loaded. Setting up Pipeline...")
     pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
         args.pretrained_model_name_or_path,
         controlnet=[controlnet_a, controlnet_b],
