@@ -315,7 +315,9 @@ def main():
                 timesteps = torch.randint(0, scheduler.config.num_train_timesteps, (bsz,), device=latents.device).long()
                 
                 # Add noise
-                sigmas = scheduler.sigmas[timesteps].flatten()
+                # Sigmas indexing (timesteps=GPU, sigmas=CPU)
+                # Fix: Move timesteps to CPU for indexing, or move sigmas to GPU
+                sigmas = scheduler.sigmas[timesteps.cpu()].to(device=latents.device).flatten()
                 # SD3 Rectified Flow: z_t = (1-t)x + t*noise ? Or other way?
                 # Using scheduler.add_noise ensures consistency
                 noisy_latents = scheduler.add_noise(latents, noise, timesteps)
