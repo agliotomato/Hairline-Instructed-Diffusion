@@ -21,7 +21,7 @@ from diffusers import (
     SD3ControlNetModel,
     StableDiffusion3Pipeline,
 )
-from diffusers.training_utils import compute_density_loss_weighting, compute_loss_weighting_for_sd3
+from diffusers.training_utils import compute_loss_weighting_for_sd3
 from diffusers.optimization import get_scheduler
 from transformers import AutoTokenizer, CLIPTextModelWithProjection, T5EncoderModel
 from tqdm.auto import tqdm
