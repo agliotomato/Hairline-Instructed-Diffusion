@@ -331,18 +331,15 @@ def main():
     # Enable Gradient Checkpointing for VRAM savings
     controlnet_a.enable_gradient_checkpointing()
     controlnet_b.enable_gradient_checkpointing()
-    # Also for transformer if we were training it, but we are freezing it.
-    # However, for ControlNet training, sometimes we need the gradient to flow through 
-    # (but not update) the base model? No, base model is frozen.
-    # Just checkpointing ControlNets is usually enough.
+    # CRITICAL FIX: Enable gradient checkpointing for frozen transformer to save activation memory
+    transformer.enable_gradient_checkpointing()
 
     controlnet_a.train()
     controlnet_b.train()
-    
-    # Save VRAM by offloading pipeline components we don't need immediately?
-    # We need text encoders for prompt encoding step.
-    # We can keep them on CPU and move to GPU only when needed, or keep in pipeline.
-    # For training optimization, assume sufficient VRAM or use accelerator.
+    # Transformer remains in eval mode usually, but check pointing might need train mode?
+    # Diffusers enable_gradient_checkpointing usually handles this.
+    # Keep transformer in eval to disable dropout
+    transformer.eval() 
     
     # Optimizer
     optimizer = torch.optim.AdamW(
@@ -364,13 +361,9 @@ def main():
         controlnet_a, controlnet_b, optimizer, train_dataloader
     )
     
-    # weight_dtype logic moved to top
-        
     # Move pipeline components to device
     pipeline.set_progress_bar_config(disable=True)
     pipeline = pipeline.to(accelerator.device) 
-    # Note: text encoders might consume LOTS of VRAM. 
-    # Ideally should offload. prompt encoding is once per batch.
     
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     max_train_steps = args.max_train_steps or args.num_train_epochs * num_update_steps_per_epoch
@@ -382,7 +375,6 @@ def main():
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet_a, controlnet_b):
                 # 1. Text Encoding using Pipeline
-                # pipeline.encode_prompt handles the complexity
                 with torch.no_grad():
                     (
                         prompt_embeds,
@@ -408,11 +400,16 @@ def main():
                     # Resize mask to latent resolution (H/8, W/8)
                     mask = batch["hair_mask"].to(device=accelerator.device, dtype=weight_dtype)
                     mask_cond = torch.nn.functional.interpolate(mask, size=latents.shape[-2:], mode="nearest")
-                    # mask_cond is now [Batch, 1, 128, 128]
                     
                     # Encode Identity
                     masked_bald = batch["masked_bald_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
                     identity_latents = vae.encode(masked_bald).latent_dist.sample() * vae.config.scaling_factor
+
+                # AGGRESSIVE CLEANUP: Free VRAM after encodings are done
+                # We can't delete pipeline yet if we loop? 
+                # Actually, encoding happens per batch. We can't delete text encoder if we need it next batch.
+                # However, we can aggressively empty cache.
+                torch.cuda.empty_cache()
 
                 # 3. Flow Matching Noise
                 noise = torch.randn_like(latents)
