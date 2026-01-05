@@ -243,6 +243,12 @@ def main():
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
     
+    # Cast GroupNorm/LayerNorm to fp32 for stability and to avoid "mixed dtype" errors
+    if args.mixed_precision == "fp16":
+        for name, module in unet.named_modules():
+            if isinstance(module, (torch.nn.GroupNorm, torch.nn.LayerNorm)):
+                module.float()
+    
     # Train ControlNets
     controlnet_a.train()
     controlnet_b.train()
