@@ -319,9 +319,11 @@ def main():
     
     controlnet_b.train()
     
-    # Cast ControlNets to correct precision (FP16)
-    controlnet_a.to(dtype=weight_dtype)
-    controlnet_b.to(dtype=weight_dtype)
+    # Cast ControlNets to correct precision (FP16) - REMOVED
+    # Keeping them in FP32 allows standard Mixed Precision optimizer step.
+    # Autocast handles the FP16 ops.
+    # controlnet_a.to(dtype=weight_dtype) 
+    # controlnet_b.to(dtype=weight_dtype)
 
     controlnet_a.requires_grad_(True)
     controlnet_b.requires_grad_(True)
