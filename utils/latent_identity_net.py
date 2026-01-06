@@ -27,15 +27,38 @@ from diffusers.models.attention_processor import (
     AttnAddedKVProcessor,
     AttnProcessor,
 )
-from diffusers.models.embeddings import TextImageProjection, TextImageTimeEmbedding, TextTimeEmbedding, TimestepEmbedding, Timesteps
+try:
+    from diffusers.models.embeddings import TextImageProjection, TextImageTimeEmbedding, TextTimeEmbedding, TimestepEmbedding, Timesteps
+except ImportError:
+    from diffusers.models.embeddings import (
+        TextImageProjection,
+        TextImageTimeEmbedding,
+        TextTimeEmbedding,
+        TimestepEmbedding,
+        Timesteps,
+    )
+
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.unet_2d_blocks import (
-    CrossAttnDownBlock2D,
-    DownBlock2D,
-    UNetMidBlock2DCrossAttn,
-    get_down_block,
-)
-from diffusers.models.unet_2d_condition import UNet2DConditionModel
+
+try:
+    from diffusers.models.unet_2d_blocks import (
+        CrossAttnDownBlock2D,
+        DownBlock2D,
+        UNetMidBlock2DCrossAttn,
+        get_down_block,
+    )
+except ImportError:
+    from diffusers.models.unets.unet_2d_blocks import (
+        CrossAttnDownBlock2D,
+        DownBlock2D,
+        UNetMidBlock2DCrossAttn,
+        get_down_block,
+    )
+
+try:
+    from diffusers.models.unet_2d_condition import UNet2DConditionModel
+except ImportError:
+    from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
