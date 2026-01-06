@@ -229,6 +229,10 @@ def main():
     parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--max_train_steps", type=int, default=None)
     parser.add_argument("--proportion_empty_prompts", type=float, default=0.1)
+    parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true")
+    parser.add_argument("--gradient_checkpointing", action="store_true")
+    parser.add_argument("--use_8bit_adam", action="store_true")
+    parser.add_argument("--seed", type=int, default=None)
 
     args = parser.parse_args()
     
@@ -245,6 +249,9 @@ def main():
     print("✅ TF32 enabled.")
     # ------------------
     
+    if args.seed is not None:
+        set_seed(args.seed)
+
     accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir)
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -292,24 +299,27 @@ def main():
     controlnet_b.train()
     
     # Enable Gradient Checkpointing
-    controlnet_a.enable_gradient_checkpointing()
-    controlnet_b.enable_gradient_checkpointing()
-    unet.enable_gradient_checkpointing() 
+    if args.gradient_checkpointing:
+        print("✅ Enabling Gradient Checkpointing.")
+        controlnet_a.enable_gradient_checkpointing()
+        controlnet_b.enable_gradient_checkpointing()
+        unet.enable_gradient_checkpointing() 
 
     # Enable Xformers (Crucial for SDXL on <48GB VRAM)
-    if is_xformers_available():
-        import xformers
-        xformers_version = version.parse(xformers.__version__)
-        if xformers_version == version.parse("0.0.16"):
-            logger.warn(
-                "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
-            )
-        unet.enable_xformers_memory_efficient_attention()
-        controlnet_a.enable_xformers_memory_efficient_attention()
-        controlnet_b.enable_xformers_memory_efficient_attention()
-        print("✅ Xformers memory efficient attention enabled.")
-    else:
-        print("⚠️ Xformers not available. Expect high VRAM usage.")
+    if args.enable_xformers_memory_efficient_attention:
+        if is_xformers_available():
+            import xformers
+            xformers_version = version.parse(xformers.__version__)
+            if xformers_version == version.parse("0.0.16"):
+                logger.warn(
+                    "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                )
+            unet.enable_xformers_memory_efficient_attention()
+            controlnet_a.enable_xformers_memory_efficient_attention()
+            controlnet_b.enable_xformers_memory_efficient_attention()
+            print("✅ Xformers memory efficient attention enabled.")
+        else:
+            print("⚠️ Xformers not available. Expect high VRAM usage.")
 
     if args.mixed_precision == "fp16":
         # Cast frozen models to fp16
@@ -319,13 +329,17 @@ def main():
         unet.to(dtype=weight_dtype)
 
     # Optimizer: Use 8-bit AdamW to save VRAM (Crucial even at 512px for 2 ControlNets)
-    try:
-        import bitsandbytes as bnb
-        optimizer_class = bnb.optim.AdamW8bit
-        print("✅ Using 8-bit AdamW optimizer (bitsandbytes) to fit in VRAM.")
-    except ImportError:
+    if args.use_8bit_adam:
+        try:
+            import bitsandbytes as bnb
+            optimizer_class = bnb.optim.AdamW8bit
+            print("✅ Using 8-bit AdamW optimizer (bitsandbytes) to fit in VRAM.")
+        except ImportError:
+            optimizer_class = torch.optim.AdamW
+            print("⚠️ bitsandbytes not found. Using standard AdamW (High VRAM risk).")
+    else:
         optimizer_class = torch.optim.AdamW
-        print("⚠️ bitsandbytes not found. Using standard AdamW (High VRAM risk).")
+        print("✅ Using standard AdamW optimizer.")
 
     params_to_optimize = list(controlnet_a.parameters()) + list(controlnet_b.parameters())
     optimizer = optimizer_class(
