@@ -505,14 +505,12 @@ def main():
                     # VRAM OPTIMIZATION: Move Transformer to GPU ON-DEMAND
                     transformer.to(accelerator.device)
                     
-                    # DEBUG: Check devices
-                    if accelerator.is_main_process:
-                         print(f"DEBUG: noisy_latents device: {noisy_latents.device}")
-                         print(f"DEBUG: timesteps device: {timesteps.device}")
-                         print(f"DEBUG: prompt_embeds device: {prompt_embeds.device}")
-                         print(f"DEBUG: pooled_prompt_embeds device: {pooled_prompt_embeds.device}")
-                         print(f"DEBUG: residuals device: {combined_residuals[0].device if combined_residuals else 'None'}")
-                         print(f"DEBUG: transformer device: {transformer.device if hasattr(transformer, 'device') else 'Unknown'}")
+                    # Ensure all inputs are on the correct device
+                    noisy_latents = noisy_latents.to(accelerator.device)
+                    timesteps = timesteps.to(accelerator.device)
+                    prompt_embeds = prompt_embeds.to(accelerator.device)
+                    pooled_prompt_embeds = pooled_prompt_embeds.to(accelerator.device)
+                    # residuals are already on device from ControlNet forward
 
                     model_pred = transformer(
                         hidden_states=noisy_latents,
@@ -523,11 +521,17 @@ def main():
                         return_dict=True
                     ).sample
                     
-                    # Move Transformer BACK to CPU to save memory for next batch encoding
-                    # Note: Moving back and forth is slow, but necessary if OOM. 
-                    # If we can fit Transformer + T5, we don't need this. But A100 OOM suggests we can't.
-                    transformer.to("cpu")
-                    torch.cuda.empty_cache()
+                    # Note: We keeps Transformer on GPU until backward is done if using Gradient Checkpointing?
+                    # Actually, for Gradient Checkpointing, the forward pass happens, then backward re-runs parts of forward.
+                    # If we move transformer to CPU now, backward might fail if it needs the weights on GPU.
+                    # BUT Diffusers Gradient Checkpointing usually handles weight hooks? 
+                    # No, standard implementation requires weights on device.
+                    # Attempting to move to CPU *after* backward is safer. 
+                    # But here we are inside `accelerate.accumulate`.
+                    # Let's KEEP Transformer on GPU for now. 
+                    # Aggressive offloading is risky with Gradient Checkpointing without hooks.
+                    # transformer.to("cpu") 
+                    # torch.cuda.empty_cache()
                 
                 # 6. Loss
                 # Weighting for Flow Matching?
