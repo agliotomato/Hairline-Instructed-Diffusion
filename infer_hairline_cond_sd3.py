@@ -103,6 +103,35 @@ class HybridVAE(torch.nn.Module):
             return MockOutput(x)
         return self.vae.encode(x)
 
+class ConcatenatingSD3ControlNet(torch.nn.Module):
+    """
+    Wrapper to concatenate noisy_latents (hidden_states) with condition 
+    before passing to ControlNet, matching Training Logic.
+    """
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        
+    def __getattr__(self, name):
+         # Delegate to inner model
+         if name in ["model", "_modules"]:
+             return super().__getattr__(name) 
+         # Standard lookup
+         try:
+             return super().__getattr__(name)
+         except AttributeError:
+             return getattr(self.model, name)
+             
+    def forward(self, hidden_states, controlnet_cond, **kwargs):
+        # Concatenate: [Latents(16) | Condition(N)]
+        # This matches training: torch.cat([noisy_latents, mask_cond], dim=1)
+        cond_input = torch.cat([hidden_states, controlnet_cond], dim=1)
+        return self.model(
+            hidden_states=hidden_states, 
+            controlnet_cond=cond_input, 
+            **kwargs
+        )
+
 def main():
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -112,6 +141,10 @@ def main():
     print("Loading ControlNets...")
     controlnet_a = SD3ControlNetModel.from_pretrained(args.controlnet_a_path, torch_dtype=dtype)
     controlnet_b = SD3ControlNetModel.from_pretrained(args.controlnet_b_path, torch_dtype=dtype)
+    
+    # Wrap them for Concatenation
+    controlnet_a = ConcatenatingSD3ControlNet(controlnet_a)
+    controlnet_b = ConcatenatingSD3ControlNet(controlnet_b)
     
     # Load Pipeline
     print("Loading Pipeline...")
