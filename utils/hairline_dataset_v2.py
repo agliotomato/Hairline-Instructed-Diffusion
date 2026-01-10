@@ -164,7 +164,7 @@ class HairlineDatasetV2(Dataset):
         
         # Extract Classes
         # 255: Hair, 127: Face, 0: Background
-        hair_raw = (mask_np == 255).astype(np.floatㅌ`32)
+        hair_raw = (mask_np == 255).astype(np.float32)
         face_raw = (mask_np == 127).astype(np.float32)
         
         # Augmentation: Smart Blur vs Sharp (50:50)
