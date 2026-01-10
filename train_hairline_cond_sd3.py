@@ -342,18 +342,7 @@ def main():
     transformer.eval() 
     
     # Optimizer
-    # 8-bit AdamW for VRAM optimization (approx 1/4 memory usage for optimizer states)
-    try:
-        import bitsandbytes as bnb
-        optimizer_cls = bnb.optim.AdamW8bit
-        if accelerator.is_main_process:
-            print("Using 8-bit AdamW Optimizer")
-    except ImportError:
-        if accelerator.is_main_process:
-            print("bitsandbytes not found, falling back to standard AdamW (High VRAM usage)")
-        optimizer_cls = torch.optim.AdamW
-
-    optimizer = optimizer_cls(
+    optimizer = torch.optim.AdamW(
         itertools.chain(controlnet_a.parameters(), controlnet_b.parameters()),
         lr=args.learning_rate
     )
@@ -392,7 +381,7 @@ def main():
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(controlnet_a, controlnet_b):
                 # 1. Text Encoding using Pipeline
-                # Move text encoders to GPU just for this operation
+                # GH200 OPTIMIZATION: Check Text Encoders on GPU for maximum speed
                 pipeline.text_encoder.to(accelerator.device)
                 pipeline.text_encoder_2.to(accelerator.device)
                 pipeline.text_encoder_3.to(accelerator.device)
@@ -407,20 +396,21 @@ def main():
                         prompt=batch["prompt"],
                         prompt_2=None,
                         prompt_3=None,
-                        device=accelerator.device, # Use accelerator device
+                        device=accelerator.device, # Run on GPU
                         do_classifier_free_guidance=False 
                     )
                     prompt_embeds = prompt_embeds.to(dtype=weight_dtype)
                     pooled_prompt_embeds = pooled_prompt_embeds.to(dtype=weight_dtype)
                 
-                # Move text encoders back to CPU immediately
-                pipeline.text_encoder.to("cpu")
-                pipeline.text_encoder_2.to("cpu")
-                pipeline.text_encoder_3.to("cpu")
-                torch.cuda.empty_cache()
-                    
+                # We can keep them on GPU or move back. 
+                # For 96GB, keeping them is probably fine unless we want to squeeze max batch size.
+                # Let's move them back to be safe against fragmentation, but NOT strict "cpu" offload.
+                # Actually, simply clearing cache is enough if we overwrite.
+                # But safer to offload if not used again in loop.
+                # pipeline.text_encoder.to("cpu") ...
+                
                 # 2. VAE Encode
-                # Move VAE to GPU just for this operation
+                # Move VAE to GPU
                 vae.to(accelerator.device)
                 
                 pixel_values = batch["pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
@@ -437,41 +427,29 @@ def main():
                     masked_bald = batch["masked_bald_pixel_values"].to(device=accelerator.device, dtype=weight_dtype)
                     identity_latents = vae.encode(masked_bald).latent_dist.sample() * vae.config.scaling_factor
 
-                # Move VAE back to CPU immediately
-                vae.to("cpu")
+                # VAE can stay or go.
+                # vae.to("cpu") 
                 
-                # AGGRESSIVE CLEANUP: Free VRAM after encodings are done
-                torch.cuda.empty_cache()
-
                 # 3. Flow Matching Noise
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
                 timesteps = torch.randint(0, scheduler.config.num_train_timesteps, (bsz,), device=latents.device).long()
                 
                 # Add noise
-                # Sigmas indexing (timesteps=GPU, sigmas=CPU)
-                # Fix: Move timesteps to CPU for indexing, or move sigmas to GPU
                 sigmas = scheduler.sigmas[timesteps.cpu()].to(device=latents.device).flatten()
-                # Force sigmas to weight_dtype (fp16) to prevent promotion to float32
                 sigmas = sigmas.to(dtype=weight_dtype)
 
-                # SD3 Rectified Flow: z_t = (1-t)x + t*noise
-                # Manual implementation since scheduler.add_noise is missing
                 sigmas = sigmas.view(-1, 1, 1, 1)
                 noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
                 
-                # Target for Velocity (Rectified Flow)
                 target = noise - latents 
 
                 # 4. Forward ControlNets (Hybrid)
-                # Important: SD3ControlNet expects concatenated input (Noisy Latents + Condition)
                 
                 # Stream A (Geometry)
-                # Input: 16ch (Noisy) + 1ch (Mask) = 17ch
                 noisy_latents = noisy_latents.to(dtype=weight_dtype)
                 cond_a_input = torch.cat([noisy_latents, mask_cond], dim=1).to(dtype=weight_dtype)
                 
-                # Use autocast for safer mixed precision handling
                 with accelerator.autocast():
                     out_a = controlnet_a(
                         hidden_states=noisy_latents,
@@ -483,7 +461,6 @@ def main():
                     )
                     
                     # Stream B (Identity)
-                    # Input: 16ch (Noisy) + 16ch (Identity Latents) = 32ch
                     cond_b_input = torch.cat([noisy_latents, identity_latents], dim=1).to(dtype=weight_dtype)
                     out_b = controlnet_b(
                         hidden_states=noisy_latents,
@@ -495,14 +472,13 @@ def main():
                     )
                     
                     # Merge Residuals
-                    # out_a is tuple (residuals,)
                     residuals_a = out_a[0]
                     residuals_b = out_b[0]
                     
                     combined_residuals = [a + b for a, b in zip(residuals_a, residuals_b)]
                     
                     # 5. Transformer Forward
-                    # VRAM OPTIMIZATION: Move Transformer to GPU ON-DEMAND
+                    # GH200 OPTIMIZATION: Keep Transformer on GPU
                     transformer.to(accelerator.device)
                     
                     # Ensure all inputs are on the correct device
@@ -510,7 +486,6 @@ def main():
                     timesteps = timesteps.to(accelerator.device)
                     prompt_embeds = prompt_embeds.to(accelerator.device)
                     pooled_prompt_embeds = pooled_prompt_embeds.to(accelerator.device)
-                    # residuals are already on device from ControlNet forward
 
                     model_pred = transformer(
                         hidden_states=noisy_latents,
@@ -521,17 +496,7 @@ def main():
                         return_dict=True
                     ).sample
                     
-                    # Note: We keeps Transformer on GPU until backward is done if using Gradient Checkpointing?
-                    # Actually, for Gradient Checkpointing, the forward pass happens, then backward re-runs parts of forward.
-                    # If we move transformer to CPU now, backward might fail if it needs the weights on GPU.
-                    # BUT Diffusers Gradient Checkpointing usually handles weight hooks? 
-                    # No, standard implementation requires weights on device.
-                    # Attempting to move to CPU *after* backward is safer. 
-                    # But here we are inside `accelerate.accumulate`.
-                    # Let's KEEP Transformer on GPU for now. 
-                    # Aggressive offloading is risky with Gradient Checkpointing without hooks.
-                    # transformer.to("cpu") 
-                    # torch.cuda.empty_cache()
+                    # GH200: Do NOT move transformer to CPU. Keep it hot.
                 
                 # 6. Loss
                 # Weighting for Flow Matching?
