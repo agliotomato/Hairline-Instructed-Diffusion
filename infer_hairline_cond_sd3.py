@@ -12,6 +12,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler
 )
 from torchvision import transforms
+from tqdm.auto import tqdm
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Inference for SD3 Hybrid ControlNet")
