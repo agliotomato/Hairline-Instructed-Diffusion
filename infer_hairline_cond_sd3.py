@@ -83,9 +83,10 @@ def main():
     
     # Load Pipeline
     print("Loading Pipeline...")
+    # SD3 Pipeline accepts list of ControlNets directly
     pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
         args.pretrained_model_name_or_path,
-        controlnet=multi_controlnet,
+        controlnet=[controlnet_a, controlnet_b],
         torch_dtype=dtype
     )
     pipe.to(device)
@@ -151,7 +152,7 @@ def main():
     image = pipe(
         prompt=args.prompt,
         control_image=control_images,
-        control_net_conditioning_scale=[args.scale_geometry, args.scale_identity],
+        controlnet_conditioning_scale=[args.scale_geometry, args.scale_identity],
         num_inference_steps=args.steps,
         guidance_scale=args.guidance_scale,
         generator=torch.manual_seed(args.seed),
