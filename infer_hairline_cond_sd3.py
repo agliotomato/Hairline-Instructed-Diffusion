@@ -16,8 +16,8 @@ from torchvision import transforms
 def parse_args():
     parser = argparse.ArgumentParser(description="Inference for SD3 Hybrid ControlNet")
     parser.add_argument("--pretrained_model_name_or_path", type=str, default="stabilityai/stable-diffusion-3.5-medium")
-    parser.add_argument("--controlnet_a_path", type=str, required=True, help="Path to Geometry ControlNet (1ch)")
-    parser.add_argument("--controlnet_b_path", type=str, required=True, help="Path to Identity ControlNet (16ch)")
+    parser.add_argument("--controlnet_a_path", type=str, default="output/hairline_sd3_run1/controlnet_a", help="Path to Geometry ControlNet (1ch)")
+    parser.add_argument("--controlnet_b_path", type=str, default="output/hairline_sd3_run1/controlnet_b", help="Path to Identity ControlNet (16ch)")
     parser.add_argument("--bald_image", type=str, required=True, help="Path to Bald Image")
     parser.add_argument("--mask_image", type=str, required=True, help="Path to Hair Mask (White=Hair)")
     parser.add_argument("--prompt", type=str, required=True)
