@@ -211,7 +211,7 @@ def main():
     # Use Pipeline to handle model loading & prompt encoding logic cleanly
     pipeline = StableDiffusion3Pipeline.from_pretrained(
         args.pretrained_model_name_or_path,
-        torch_dtype=torch.float16 if args.mixed_precision == "fp16" else torch.float32 
+        torch_dtype=weight_dtype
     )
     # We only need encoding methods and models.
     # We will extract models from pipeline.
