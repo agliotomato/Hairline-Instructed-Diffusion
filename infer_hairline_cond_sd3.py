@@ -249,8 +249,21 @@ def main():
     noise = torch.randn(init_latents.shape, generator=generator, device=device, dtype=dtype)
     start_timestep = timesteps[0]
     
-    # Add noise using scheduler
-    latents = scheduler.add_noise(init_latents, noise, start_timestep)
+    # scheduler.add_noise doesn't exist for FlowMatchEulerDiscreteScheduler in all versions
+    # Manual Flow Matching Add Noise:
+    # noisy = (1 - sigma) * x0 + sigma * z
+    # retrieve sigma for the start timestep
+    # scheduler.sigmas is usually available after set_timesteps
+    # timesteps[0] corresponds to init_timestep_idx
+    
+    # Map timestep to sigma
+    # FlowMatchEulerDiscreteScheduler: sigmas are stored in scheduler.sigmas
+    # They align with timesteps.
+    start_sigma = scheduler.sigmas[init_timestep_idx]
+    start_sigma = start_sigma.to(device=device, dtype=dtype)
+    
+    # Add noise
+    latents = (1.0 - start_sigma) * init_latents + start_sigma * noise
     
     # 4. Prepare Conditions (Already processed above)
     # mask_tensor_latent (1ch)
