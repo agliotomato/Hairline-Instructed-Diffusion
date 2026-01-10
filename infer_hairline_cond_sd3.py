@@ -78,7 +78,15 @@ class HybridVAE(torch.nn.Module):
         # Delegate attributes
     
     def __getattr__(self, name):
-        return getattr(self.vae, name)
+        # Prevent recursion by letting nn.Module resolve 'vae' and other standard attrs first
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            # Delegate to inner VAE if not found in wrapper
+            # Use _modules directly to avoid recursive lookup of 'vae'
+            if 'vae' in self._modules:
+                return getattr(self._modules['vae'], name)
+            raiseAttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def encode(self, x):
         # Bypass for Mask (1ch) or Latents (16ch)
