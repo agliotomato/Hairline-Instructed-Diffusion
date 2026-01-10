@@ -509,27 +509,20 @@ def main():
                 # Calculate per-element Loss
                 loss_element = F.mse_loss(model_pred, target, reduction="none") # [B, C, H, W]
                 
-                # Apply Mask
-                # mask_cond is [B, 1, H, W] (already resized to latent shape)
-                # We need to broadcast mask to Channels (16)
-                # Note: mask_cond is 0.0 or 1.0 (or soft values). 
-                # We trust the dataset to provide correct supervision mask.
+                # 6. Global Loss Calculation (Updated Strategy: Global Loss)
+                # Reason: We want the model to learn Identity/Background preservation strictly.
+                # If we only mask loss on hair, the model has NO incentive to reconstruct the background/face 
+                # from the Identity ControlNet. It might drift or produce garbage in non-hair regions.
+                # By using Global Loss, we force the model to use ControlNet B to reconstruct the frozen background perfectly.
                 
-                loss_masked = loss_element * mask_cond
+                # loss_element is [B, C, H, W]
+                # We calculate mean over everything, effectively punishing errors in Background/Face too.
+                loss = loss_element.mean()
                 
-                # Average over non-zero pixels? Or just mean over all?
-                # Usually mean over all pixels is fine if we want to minimize error to 0 outside mask (if target is 0).
-                # But here, we DON'T want to calculate loss outside mask.
-                # So the loss outside mask is 0. 
-                # If we take mean(), we are dividing by H*W.
-                # Should we divide by Mask Area?
-                # For stable training, dividing by Total Area is usually safer (consistent magnitude), 
-                # but might be small. 
-                # Let's use simple mean() of the masked loss tensor. 
-                # effectively: (Sum of Error in Hair) / (Total Elements).
-                # This downweights the loss if hair area is small, but standard practice.
-                
-                loss = loss_masked.mean()
+                # --- OLD MASKED LOSS STRATEGY (Deprecated for Quality) ---
+                # loss_masked = loss_element * mask_cond
+                # loss = loss_masked.mean()
+                # ---------------------------------------------------------
                 
                 # Optional: weighted loss for boundary? (As discussed, maybe later)
                 # For now, Simple Masked Loss.
