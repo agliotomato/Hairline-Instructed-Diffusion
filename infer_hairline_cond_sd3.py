@@ -69,6 +69,70 @@ def preprocess_mask_smart(mask_pil, resolution=1024):
     
     return torch.from_numpy(final_mask).unsqueeze(0).unsqueeze(0) # [1, 1, H, W]
 
+class HybridSD3Pipeline(StableDiffusion3ControlNetPipeline):
+    def prepare_control_image(
+        self,
+        image,
+        width,
+        height,
+        batch_size,
+        num_images_per_prompt,
+        device,
+        dtype,
+        do_classifier_free_guidance=False,
+        guess_mode=False,
+    ):
+        # Override to strict bypass VAE if input is Tensor of correct internal shape
+        # Standard SD3 ControlNet input: [B, C, H, W]
+        
+        # Helper to bypass VAE for a single image item
+        def _check_bypass(img):
+            if isinstance(img, torch.Tensor):
+                # If it's 1-channel (Mask) or 16-channel (Latent), we assume it's PREPARED.
+                # Standard RGB "image" would be 3-channel.
+                if img.shape[1] == 1 or img.shape[1] == 16:
+                    return True
+            return False
+
+        # If list, check first item?
+        is_bypass = False
+        if isinstance(image, list):
+            if _check_bypass(image[0]):
+                is_bypass = True
+        elif _check_bypass(image):
+            is_bypass = True
+            
+        if is_bypass:
+            # Bypass VAE, just process batch/device
+            control_image = image
+            if not isinstance(control_image, list):
+                control_image = [control_image]
+            
+            # Align batch size logic (repeat if needed)
+            # Simplified: We assume user passed batch size 1 or matching.
+            # Just move to device/dtype
+            prepared_images = []
+            for img in control_image:
+                img = img.to(device=device, dtype=dtype)
+                # SD3 Pipeline expects control_image to be duplicated for per-prompt?
+                # Standard implementation duplicates it by match batch_size * num_images_per_prompt
+                if do_classifier_free_guidance: # SD3CFG usually doesn't double control input? 
+                    # Actually SD3 uses `joint_attention`, so BS=2 usually (Prompt + Neg).
+                    # If passed image is BS=1, we need to repeat?
+                    if img.shape[0] < batch_size * num_images_per_prompt:
+                         img = torch.cat([img] * (batch_size * num_images_per_prompt), dim=0)
+                prepared_images.append(img)
+                
+            if len(prepared_images) == 1:
+                return prepared_images[0]
+            return prepared_images
+            
+        # Fallback to original
+        return super().prepare_control_image(
+            image, width, height, batch_size, num_images_per_prompt, device, dtype, 
+            do_classifier_free_guidance, guess_mode
+        )
+
 def main():
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -79,12 +143,10 @@ def main():
     controlnet_a = SD3ControlNetModel.from_pretrained(args.controlnet_a_path, torch_dtype=dtype)
     controlnet_b = SD3ControlNetModel.from_pretrained(args.controlnet_b_path, torch_dtype=dtype)
     
-    multi_controlnet = MultiControlNetModel([controlnet_a, controlnet_b])
-    
     # Load Pipeline
     print("Loading Pipeline...")
-    # SD3 Pipeline accepts list of ControlNets directly
-    pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
+    # Use Custom Hybrid Pipeline
+    pipe = HybridSD3Pipeline.from_pretrained(
         args.pretrained_model_name_or_path,
         controlnet=[controlnet_a, controlnet_b],
         torch_dtype=dtype
@@ -92,29 +154,12 @@ def main():
     pipe.to(device)
     
     # Preprocess Inputs
-    resolution = 1024 # SD3 standard
+    resolution = 1024 
     
     # 1. Bald Image (for Identity)
     bald_pil = Image.open(args.bald_image).convert("RGB").resize((resolution, resolution))
-    # We need to compute Latents for Identity Net!
-    # The pipeline.encode_image functionality might not expose VAE encoding for ControlNet input easily if expecting pixel values.
-    # SD3ControlNetPipeline expects 'control_image' argument.
-    # For ControlNet B (Identity), it expects 16-channel latents?
-    # Standard Pipeline expects Pixel Images and encodes them internally for ControlNet IF extra_conditioning_channels=3.
-    # But our ControlNet B has extra_conditioning_channels=16.
-    # The pipeline MIGHT crash if we pass an image to a 16-channel ControlNet.
-    # Solution: We must pass PRE-ENCODED LATENTS as control condition?
-    # Or does the pipeline handle VAE encoding for us?
-    # Looking at Diffusers source:
-    # prepare_control_image -> if model input is latent, it encodes?
-    # Actually, default SD3 ControlNet takes VAE latents (masked image) + Canny/etc.
-    # Standard SD3 ControlNet takes RGB image -> VAE -> Latent?
-    # No, SD3 ControlNet usually takes "Structure" (Canny/Pose) which might be encoded by VAE or small conv.
-    # BUT, if we use `extra_conditioning_channels=16`, it implies we want VAE Latents.
-    # The pipeline *likely* doesn't support automatic VAE encoding for custom 16-ch ControlNet out of the box unless we hack it.
-    # OR, we pass the 16-ch Latent Tensor directly as `control_image`.
     
-    # Let's Encode Manually
+    # Encode Identity to Latents (16ch)
     print("Encoding Identity Image...")
     bald_tensor = transforms.ToTensor()(bald_pil).unsqueeze(0).to(device, dtype=dtype)
     bald_tensor = (bald_tensor - 0.5) / 0.5
@@ -122,21 +167,13 @@ def main():
         identity_latents = pipe.vae.encode(bald_tensor).latent_dist.sample() * pipe.vae.config.scaling_factor
     
     # 2. Mask (for Geometry)
-    # 1-channel, but Pipeline usually expects 3-channel RGB for ControlNet.
-    # But our ControlNet A has extra_conditioning_channels=1.
-    # We should pass 1-channel tensor.
+    # 1-channel Mask
     mask_pil = Image.open(args.mask_image).convert("L")
     mask_tensor = preprocess_mask_smart(mask_pil, resolution).to(device, dtype=dtype)
     
-    # Cutout Bald Image using Sharp Mask for Identity Input
-    # Identity Latent should be "Masked Bald".
-    # Logic: Identity Latent is Full Bald Image.
-    # Wait, in training, we passed "Masked Bald".
-    # Here we passed "Full Bald".
-    # We should apply mask to bald image BEFORE encoding?
-    # Training: masked_bald = bald * (1-mask) + (-1)*mask.
-    # Yes, we should apply mask to bald image here too.
-    
+    # Cutout Bald Logic (Identity)
+    # Apply Mask to Bald Image: masked_bald = bald * (1-mask) + (-1)*mask.
+    # We use sharp mask for cutout
     hair_raw = (np.array(mask_pil.resize((resolution, resolution), Image.NEAREST)) == 255).astype(np.float32)
     hair_tensor = torch.from_numpy(hair_raw).unsqueeze(0).unsqueeze(0).to(device, dtype=dtype)
     
@@ -144,11 +181,11 @@ def main():
     with torch.no_grad():
         identity_latents = pipe.vae.encode(masked_bald_tensor).latent_dist.sample() * pipe.vae.config.scaling_factor
     
-    # List of Conditions
-    # Pipeline expects list if MultiControlNet
+    # List of Conditions [Mask(1ch), IdentityLatents(16ch)]
     control_images = [mask_tensor, identity_latents] 
     
     print("Generating...")
+    # Using 'control_image' (singular) argument name as per standard pipeline, but passing list.
     image = pipe(
         prompt=args.prompt,
         control_image=control_images,
