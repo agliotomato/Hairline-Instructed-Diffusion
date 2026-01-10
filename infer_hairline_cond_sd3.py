@@ -21,6 +21,7 @@ def parse_args():
     parser.add_argument("--bald_image", type=str, required=True, help="Path to Bald Image")
     parser.add_argument("--mask_image", type=str, required=True, help="Path to Hair Mask (White=Hair)")
     parser.add_argument("--prompt", type=str, required=True)
+    parser.add_argument("--negative_prompt", type=str, default="low quality, bad anatomy, distorted, ugly, blurry, pixelated")
     parser.add_argument("--output_path", type=str, default="output.png")
     parser.add_argument("--scale_geometry", type=float, default=1.0)
     parser.add_argument("--scale_identity", type=float, default=0.8)
