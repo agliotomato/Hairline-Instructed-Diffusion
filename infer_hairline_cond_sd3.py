@@ -67,6 +67,8 @@ def preprocess_mask_smart(mask_pil, resolution=1024):
     
     final_mask = hair_raw * face_zone_soft + hair_blur * (1.0 - face_zone_soft)
     
+    return torch.from_numpy(final_mask).unsqueeze(0).unsqueeze(0) # [1, 1, H, W]
+
 class HybridVAE(torch.nn.Module):
     """
     Wrapper around VAE to bypass encoding for already-processed tensors.
