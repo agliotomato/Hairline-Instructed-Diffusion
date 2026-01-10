@@ -245,7 +245,7 @@ def main():
     print(f"Starting from step {init_timestep_idx}/{num_inference_steps} (Strength: {strength})")
     
     # Add noise to init_latents
-    generator = torch.manual_seed(args.seed)
+    generator = torch.Generator(device=device).manual_seed(args.seed)
     noise = torch.randn(init_latents.shape, generator=generator, device=device, dtype=dtype)
     start_timestep = timesteps[0]
     
