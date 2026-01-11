@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument("--scale_identity", type=float, default=0.8)
     parser.add_argument("--steps", type=int, default=28)
     parser.add_argument("--guidance_scale", type=float, default=5.0)
-    parser.add_argument("--strength", type=float, default=0.75, help="Noise Strength for Img2Img (0.0 to 1.0). Lower = more background preservation.")
+    parser.add_argument("--strength", type=float, default=0.6, help="Noise Strength for Img2Img (0.0=NoNoise, 1.0=FullNoise). Rec: 0.6 for SD3.5")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -360,9 +360,13 @@ def main():
     image_pil = Image.fromarray((image[0] * 255).astype(np.uint8))
     
     # Make dir
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-    image_pil.save(args.output_path)
-    print(f"Saved to {args.output_path}")
+    output_path = args.output_path.strip()
+    if not os.path.splitext(output_path)[1]:
+        output_path += ".png"
+        
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    image_pil.save(output_path)
+    print(f"Saved to {output_path}")
 
 if __name__ == "__main__":
     main()
