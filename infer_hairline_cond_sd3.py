@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument("--scale_identity", type=float, default=0.8)
     parser.add_argument("--steps", type=int, default=28)
     parser.add_argument("--guidance_scale", type=float, default=5.0)
-    parser.add_argument("--strength", type=float, default=0.9, help="Noise Strength for Img2Img (0.0 to 1.0)")
+    parser.add_argument("--strength", type=float, default=0.75, help="Noise Strength for Img2Img (0.0 to 1.0). Lower = more background preservation.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -264,6 +264,7 @@ def main():
     start_sigma = start_sigma.to(device=device, dtype=dtype)
     
     # Add noise
+    print(f"Img2Img Mixing: {(1.0 - start_sigma):.4f} * Init + {start_sigma:.4f} * Noise")
     latents = (1.0 - start_sigma) * init_latents + start_sigma * noise
     
     # 4. Prepare Conditions (Already processed above)
