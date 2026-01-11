@@ -301,8 +301,9 @@ def main():
             control_conds = [c_masks, c_identity]
             
             # Block Samples
-            # pipe.controlnet is a MultiControlNetModel, it expects a list of control_conds
-            block_samples = pipe.controlnet(
+            # pipe.controlnet is a MultiControlNetModel.
+            # It returns (down_block_res_samples, mid_block_res_sample)
+            down_block_res_samples, mid_block_res_sample = pipe.controlnet(
                 hidden_states=latent_model_input,
                 timestep=current_timestep,
                 encoder_hidden_states=prompt_embeds,
@@ -311,15 +312,18 @@ def main():
                 conditioning_scale=[args.scale_geometry, args.scale_identity],
                 return_dict=False
             )
-            # block_samples is (down_block_res_samples, mid_block_res_sample)
             
             # Transformer Forward
+            # SD3 Transformer expects block_controlnet_hidden_states to be a list of tensors.
+            # down_block_res_samples is that list. mid_block_res_sample is usually None or ignored for SD3 structure?
+            # Actually SD3 ControlNet 'down' blocks map to the DiT blocks.
+            
             noise_pred = pipe.transformer(
                 hidden_states=latent_model_input,
                 timestep=current_timestep,
                 encoder_hidden_states=prompt_embeds,
                 pooled_projections=pooled_prompt_embeds,
-                block_controlnet_hidden_states=block_samples,
+                block_controlnet_hidden_states=down_block_res_samples,
                 return_dict=False
             )[0] # .sample
             
