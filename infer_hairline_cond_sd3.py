@@ -278,6 +278,18 @@ def main():
             # Broadcast params for CFG
             latent_model_input = torch.cat([latents] * 2) if args.guidance_scale > 1.0 else latents
             
+            # Broadcast timestep to batch size (fix for SD3 ControlNet assertion)
+            # t is usually a scalar tensor from scheduler.timesteps
+            batch_size = latent_model_input.shape[0]
+            current_timestep = t.expand(batch_size) if isinstance(t, torch.Tensor) and t.ndim == 0 else t
+            if isinstance(current_timestep, torch.Tensor) and current_timestep.ndim == 0:
+                 current_timestep = current_timestep.unsqueeze(0).expand(batch_size)
+            # Ensure it is on the correct device
+            current_timestep = current_timestep.to(device=device, dtype=latents.dtype) # Timesteps are often float/int, but let's match what model expects or keep it as is?
+            # Actually, standard pipe handles this carefully. SD3 expects float usually for flow match, but embedding layer expects 1D.
+            # let's just make it 1D tensor.
+            current_timestep = torch.tensor([t] * batch_size, device=device) # SafeArea fallback
+            
             # Prepare ControlNet Condition
             c_masks = mask_tensor_latent
             c_identity = identity_latents_controlnet_cond
@@ -292,7 +304,7 @@ def main():
             # pipe.controlnet is a MultiControlNetModel, it expects a list of control_conds
             block_samples = pipe.controlnet(
                 hidden_states=latent_model_input,
-                timestep=t,
+                timestep=current_timestep,
                 encoder_hidden_states=prompt_embeds,
                 pooled_projections=pooled_prompt_embeds,
                 controlnet_cond=control_conds,
@@ -304,7 +316,7 @@ def main():
             # Transformer Forward
             noise_pred = pipe.transformer(
                 hidden_states=latent_model_input,
-                timestep=t,
+                timestep=current_timestep,
                 encoder_hidden_states=prompt_embeds,
                 pooled_projections=pooled_prompt_embeds,
                 block_controlnet_hidden_states=block_samples,
