@@ -225,12 +225,15 @@ def main():
             
             # Simpler approach: Use the same scheduler to add noise
             # But scheduler.add_noise takes 'original_samples' and 'noise' and 'timesteps'
+            # SD3 Flow Matching Manual Noise Addition:
+            # z_t = (1 - sigma) * x + sigma * noise
             
-            latents_bg = pipe.scheduler.add_noise(
-                init_latents, 
-                noise_bg, 
-                torch.tensor([next_t], device=device)
-            )
+            # Get sigma for next step
+            # pipe.scheduler.sigmas follows the same order as timesteps
+            sigma_next = pipe.scheduler.sigmas[i + 1]
+            
+            # Interpolate
+            latents_bg = (1 - sigma_next) * init_latents + sigma_next * noise_bg
             
             # Blend: Keep Generated in Mask (1), Keep Background in (1-Mask)
             # Soft Blending? We have mask_latent.
