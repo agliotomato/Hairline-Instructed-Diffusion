@@ -77,14 +77,15 @@ def main():
         adapter_features = adapter(mask_for_adapter) # [1, 16, 128, 128]
     
     # Encode Prompt
-    (prompt_embeds, negative_prompt_embeds, 
-     pooled_prompt_embeds, negative_pooled_prompt_embeds) = pipe.encode_prompt(
-        prompt=args.prompt, 
-        prompt_2=args.prompt,
-        prompt_3=args.prompt,
-        negative_prompt="bad quality, ugly", 
-        device=device
-    )
+    with torch.no_grad():
+        (prompt_embeds, negative_prompt_embeds, 
+         pooled_prompt_embeds, negative_pooled_prompt_embeds) = pipe.encode_prompt(
+            prompt=args.prompt, 
+            prompt_2=args.prompt,
+            prompt_3=args.prompt,
+            negative_prompt="bad quality, ugly", 
+            device=device
+        )
 
     # ---------------------------------------------------------
     # Phase 1: SONIC (Seed Optimization)
