@@ -86,6 +86,11 @@ def main():
         do_classifier_free_guidance=True
     )
 
+    # CRITICAL FIX: Concatenate embeddings for Classifier-Free Guidance (CFG)
+    # The transformer expects [negative, positive] order for the batch
+    prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+    pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
+
     for i, t in enumerate(tqdm(timesteps)):
         # 5.1. Repainting / Blending Step
         # At this timestep t, what should the "Background" look like?
