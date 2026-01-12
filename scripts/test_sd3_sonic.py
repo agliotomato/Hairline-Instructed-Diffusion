@@ -28,7 +28,8 @@ def main():
     print(f"Loading SD3.5 from {args.model_id}...")
     # Load pipeline
     pipe = StableDiffusion3Pipeline.from_pretrained(args.model_id, torch_dtype=dtype)
-    pipe.enable_model_cpu_offload()
+    # pipe.enable_model_cpu_offload() # CAUTION: Offload breaks backward pass optimization
+    pipe.to(device)
     
     # 1. Prepare Images & Masks
     resolution = 1024
