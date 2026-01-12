@@ -32,33 +32,35 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on {device}")
     
-    # Load SD3.5
+    # Load SD3.5 in bfloat16 to save memory (Fixes OOM on 40GB A100)
     pipe = StableDiffusion3Pipeline.from_pretrained(
         "stabilityai/stable-diffusion-3.5-medium",
-        torch_dtype=torch.float32 # Use float32 for SONIC stability
+        torch_dtype=torch.bfloat16 
     ).to(device)
     
     # Load TinyAdapter
     print(f"Loading TinyAdapter from {args.adapter_path}")
     adapter = TinyAdapter(input_channels=1, output_channels=16)
     adapter.load_state_dict(torch.load(args.adapter_path, map_location=device))
-    adapter.to(device, dtype=torch.float32)
+    adapter.to(device, dtype=torch.bfloat16)
     adapter.eval()
     
     # 2. Helper Functions
     def load_image(path, size=(1024, 1024)):
         img = Image.open(path).convert("RGB").resize(size, Image.BILINEAR)
-        return transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0
+        # return as bf16
+        return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
     def load_mask(path, size=(1024, 1024)):
         mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
         mask_tensor = transforms.ToTensor()(mask).unsqueeze(0).to(device)
-        return (mask_tensor > 0.5).float()
+        return (mask_tensor > 0.5).float().to(torch.bfloat16)
 
     # 3. Prepare Data
     print("Preparing Data...")
-    original_image = load_image(args.image_path)    # [-1, 1], [1, 3, 1024, 1024]
-    mask_highres = load_mask(args.mask_path)        # [0, 1], [1, 1, 1024, 1024]
+    # Inputs are bf16
+    original_image = load_image(args.image_path)    
+    mask_highres = load_mask(args.mask_path)        
     
     # Encode Original Image (y)
     with torch.no_grad():
@@ -67,16 +69,12 @@ def main():
     # Prepare Mask for Latent Blending
     mask_latent = F.interpolate(mask_highres, size=init_latents.shape[-2:], mode="nearest")
     
-    # Prepare Mask for Adapter (ensure dimensions match expected input if needed)
-    # The Adapter was designed/trained to take the latent-sized mask.
+    # Prepare Mask for Adapter
     mask_for_adapter = mask_latent.clone()
     
     # Get Adapter Features
     with torch.no_grad():
         adapter_features = adapter(mask_for_adapter) # [1, 16, 128, 128]
-        # Important: Weigh the adapter influence?
-        # The adapter was trained to be ADDED directly. 
-        # But we can multiply by a scale if needed. Let's keep it 1.0 for now.
     
     # Encode Prompt
     (prompt_embeds, negative_prompt_embeds, 
@@ -93,13 +91,8 @@ def main():
     # ---------------------------------------------------------
     print("Starting Phase 1: SONIC Optimization...")
     
-    # Init Noise (Background Mixed)
-    # Start with pure noise, but maybe mix a bit of y for stability?
-    # SONIC paper suggests starting from random noise.
-    init_noise = torch.randn_like(init_latents)
-    
-    # Optimization target: init_noise
-    # We want init_noise such that when Denoised(init_noise) ~ y in Background
+    # Init Noise (Optimize in float32 for precision)
+    init_noise = torch.randn_like(init_latents, dtype=torch.float32)
     
     init_noise.requires_grad = True
     optimizer = torch.optim.Adam([init_noise], lr=args.sonic_lr)
@@ -111,25 +104,14 @@ def main():
     # SONIC Loop
     pbar = tqdm(range(args.sonic_steps), desc="SONIC")
     for i in pbar:
-        # 1. One-step Approximation (Linear Approximation)
-        # We need a large timestep. 
-        # In Flow Matching, t=1 is noise, t=0 is image.
-        # We pick something close to noise.
+        # Cast init_noise to bf16 for model forward
+        init_noise_bf16 = init_noise.to(torch.bfloat16)
+        
         t_val = 999 
         t = torch.tensor([t_val], device=device)
         
-        # Current Estimate x0_hat
-        # SD3 Prediction: v = x1 - x0 usually. 
-        # model_pred = pipe.transformer(...)
-        
-        # Note: SONIC on SD3 specific logic
-        # For prototype, we simply try to minimize (Noise - Original) in background? No.
-        # We want Denoised(Noise) to match Original Background.
-        # Let's use the proven logic from test_sd3_sonic.py
-        
-        # Inject Adapter Features even during SONIC? 
-        # Ideally YES, so the noise is optimized *knowing* about the hair structure.
-        model_input = init_noise + adapter_features
+        # Inject Adapter
+        model_input = init_noise_bf16 + adapter_features
         
         model_pred = pipe.transformer(
             hidden_states=model_input,
@@ -139,16 +121,17 @@ def main():
             return_dict=False
         )[0]
         
-        # Linear Approximation for Flow Matching
-        # flow v = x1 - x0  => x0 = x1 - v
-        # Here x1 is init_noise
-        pred_x0 = init_noise - model_pred
+        # Linear Approximation: pred_x0 = x1 - v
+        # Cast back to float32 for loss calculation
+        pred_x0 = init_noise - model_pred.to(torch.float32)
         
-        # Masked Loss
-        # We want pred_x0 to match init_latents (y) in the Background (1 - mask)
+        # Masked Loss (compare with float32 latents)
+        target_latents = init_latents.to(torch.float32)
+        mask_float = mask_latent.to(torch.float32)
+        
         loss = F.mse_loss(
-            pred_x0 * (1 - mask_latent), 
-            init_latents * (1 - mask_latent)
+            pred_x0 * (1 - mask_float), 
+            target_latents * (1 - mask_float)
         )
         
         optimizer.zero_grad()
@@ -171,7 +154,8 @@ def main():
     timesteps = pipe.scheduler.timesteps
     
     # Start Latents
-    latents = init_noise.detach().clone()
+    # SONIC output was float32. Cast to bf16 for Generation loop.
+    latents = init_noise.detach().clone().to(torch.bfloat16)
     
     # Manual Denoising Loop
     for i, t in enumerate(progressbar := tqdm(timesteps)):
