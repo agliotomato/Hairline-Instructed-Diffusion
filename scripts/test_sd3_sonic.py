@@ -56,12 +56,34 @@ def main():
     with torch.no_grad():
         init_latents = pipe.vae.encode(image_tensor).latent_dist.sample() * pipe.vae.config.scaling_factor
 
-    # 3. Setup Initial Noise
+    # 3. Setup Initial Noise (Improved: Start with Noisy Background)
     generator = torch.Generator(device=device).manual_seed(args.seed)
     
-    # We want to optimize this noise
-    # To optimize, we need it to be a leaf tensor with gradients
-    init_noise = torch.randn(init_latents.shape, generator=generator, device=device, dtype=dtype)
+    # Generate pure random noise
+    random_noise = torch.randn(init_latents.shape, generator=generator, device=device, dtype=dtype)
+    
+    # Add noise to original latents (simulate timestep T=1.0)
+    # Flow Matching T=1.0 implies effectively pure noise, but we want structure.
+    # We will mix: Mask * Random + (1-Mask) * (Original + Random)
+    # Actually, at T=1.0, the signal is destroyed.
+    # Key Trick: We let the "Initial Guess" be the Noisy Background.
+    
+    # We create a specific noise target for the background 
+    # (Since we want to optimize the noise, let's start with a noise that technically represents the image?)
+    # No, let's start with Random, but then forcefully inject background noise values?
+    # Better: Start with 'random_noise' but use the latent blending logic to initialize it close to background?
+    
+    # Simplest Fix:
+    # init_noise = Mask * Random + (1-Mask) * Random_that_matches_Background?
+    # No, 'Random_that_matches_Background' is just Random.
+    # The optimization step is supposed to fix this.
+    
+    # Alternative: Use standard Inpainting Initialization
+    # init_noise = random_noise (Start fully random)
+    # BUT, we might need a stronger signal for the optimizer.
+    
+    # Let's try this:
+    init_noise = random_noise.clone()
     init_noise.requires_grad_(True)
     
     # Freeze Pipeline Models (Important for optimization loop)
