@@ -81,7 +81,11 @@ def main():
     # Encode Prompt
     (prompt_embeds, negative_prompt_embeds, 
      pooled_prompt_embeds, negative_pooled_prompt_embeds) = pipe.encode_prompt(
-        prompt=args.prompt, negative_prompt="bad quality, ugly", device=device
+        prompt=args.prompt, 
+        prompt_2=args.prompt,
+        prompt_3=args.prompt,
+        negative_prompt="bad quality, ugly", 
+        device=device
     )
 
     # ---------------------------------------------------------
