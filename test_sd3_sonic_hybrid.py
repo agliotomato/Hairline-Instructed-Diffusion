@@ -176,9 +176,14 @@ def main():
         pooled_prompt_embeds_input = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds])
         
         # 4. Predict
+        # t is a scalar tensor. We need shape [2].
+        # Create a 1D tensor [t] and repeat it.
+        ts = torch.tensor([t], device=device)
+        ts = ts.repeat(2)
+        
         noise_pred = pipe.transformer(
             hidden_states=model_input,
-            timestep=torch.tensor([t], device=device).unsqueeze(0).repeat(2),
+            timestep=ts,
             encoder_hidden_states=prompt_embeds_input,
             pooled_projections=pooled_prompt_embeds_input,
             return_dict=False
