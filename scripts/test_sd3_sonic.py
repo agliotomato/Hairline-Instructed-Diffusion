@@ -16,9 +16,11 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=28)
     parser.add_argument("--guidance_scale", type=float, default=5.0)
     parser.add_argument("--opt_steps", type=int, default=30, help="Number of optimization steps for SONIC")
-    parser.add_argument("--lr", type=float, default=0.1, help="Learning rate for noise optimization")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate for noise optimization")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
+
+
 
 def main():
     args = parse_args()
@@ -172,6 +174,10 @@ def main():
         
         # 4. Backward
         loss.backward()
+        
+        # Stability Fix: Clip Gradients
+        torch.nn.utils.clip_grad_norm_([init_noise], max_norm=0.1)
+        
         optimizer.step()
         
         if i % 5 == 0:
