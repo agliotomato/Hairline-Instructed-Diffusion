@@ -1,12 +1,17 @@
 
 import torch
 import os
+import argparse
 from diffusers import StableDiffusion3Pipeline, SD3Transformer2DModel, FlowMatchEulerDiscreteScheduler
 from transformers import T5EncoderModel, CLIPTextModel, CLIPTextModelWithProjection
 
 def main():
     print("Testing SD3.5 Loading...")
     
+    parser = argparse.ArgumentParser(description="Test SD3.5 Loading")
+    parser.add_argument("--prompt", type=str, default="A close-up photo of a woman with beautiful hair, studio lighting, 8k", help="Prompt for generation")
+    args = parser.parse_args()
+
     model_id = "stabilityai/stable-diffusion-3.5-medium"
     
     # Check if authorization token is available if needed
@@ -33,7 +38,7 @@ def main():
         
         # Simple inference test
         print("Running inference test...")
-        prompt = "A close-up photo of a woman with beautiful hair, studio lighting, 8k"
+        prompt = args.prompt
         
         # If running on CPU only machine without CUDA, this might be slow or fail if float16 is not supported on CPU properly for some ops
         # But user has CUDA based on previous context (though warning said "CUDA not available" in previous step).
