@@ -61,20 +61,30 @@ def main():
     init_noise = torch.randn(init_latents.shape, generator=generator, device=device, dtype=dtype)
     init_noise.requires_grad_(True)
     
+    # Freeze Pipeline Models (Important for optimization loop)
+    pipe.transformer.requires_grad_(False)
+    pipe.vae.requires_grad_(False)
+    
     optimizer = torch.optim.Adam([init_noise], lr=args.lr)
 
     # 4. SONIC Optimization Loop (Latent Space)
     print(f"Starting SONIC Optimization on Noise ({args.opt_steps} steps)...")
     
     # Prepare text embeddings (Fixed Condition)
-    prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = pipe.encode_prompt(
-        prompt=args.prompt, 
-        prompt_2=args.prompt, 
-        prompt_3=args.prompt, 
-        negative_prompt="bad quality, ugly", 
-        device=device,
-        do_classifier_free_guidance=True
-    )
+    with torch.no_grad():
+        prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = pipe.encode_prompt(
+            prompt=args.prompt, 
+            prompt_2=args.prompt, 
+            prompt_3=args.prompt, 
+            negative_prompt="bad quality, ugly", 
+            device=device,
+            do_classifier_free_guidance=True
+        )
+    
+    # Detach just in case
+    prompt_embeds = prompt_embeds.detach()
+    negative_prompt_embeds = negative_prompt_embeds.detach() # Not used in loop currently but good practice
+    pooled_prompt_embeds = pooled_prompt_embeds.detach()
     # Concatenate for single batch pass if needed, but for optimization we might just use uncond or cond?
     # SONIC paper: "Optimize x_T such that D(x_T) matches background"
     # Usually we optimize using the UNCONDITIONAL path to ensure structure match, or COND to match prompt context?
