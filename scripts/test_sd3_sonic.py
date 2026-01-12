@@ -25,7 +25,8 @@ def parse_args():
 def main():
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
+    # FORCE FLOAT32 for Optimization Stability
+    dtype = torch.float32
 
     print(f"Loading SD3.5 from {args.model_id}...")
     # Load pipeline
