@@ -89,6 +89,12 @@ def main():
 
     # Environment Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Fix for 'GET was unable to find an engine' (CUDNN issue on some H100 setups)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    # or try disabling cudnn if persistent: torch.backends.cudnn.enabled = False
+    
     weight_dtype = torch.float32
     if args.mixed_precision == "fp16":
         weight_dtype = torch.float16
@@ -171,22 +177,32 @@ def main():
             # SD3 uses Flow Matching (t=0..1000 usually in diffusers config, or 0..1 sigmas)
             # Diffusers SD3 scheduler samples timesteps.
             
-            # We need valid discrete timesteps
-            # Just sample random integers from 0 to 1000
-            timesteps = torch.randint(0, pipe.scheduler.config.num_train_timesteps, (bsz,), device=device).long()
+            # 4. Add Noise (Timestep Sampling for Flow Matching)
+            # SD3 uses Flow Matching: z_t = (1 - t) * x_0 + t * x_1 (noise)
+            # Note: Diffusers implementation might vary, but this is the standard RF formulation.
+            # timesteps are usually 0..1000. Let's convert to sigma (0..1)
             
-            # Add noise (Forward diffusion)
-            # Diffusers scheduler.add_noise
-            noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
+            # Sample discrete timesteps
+            timesteps = torch.randint(0, 1000, (bsz,), device=device).long()
+            
+            # Convert to sigmas (0.0 to 1.0)
+            sigmas = timesteps.float() / 1000.0
+            sigmas = sigmas.view(-1, 1, 1, 1) # Broadcast
+            
+            # Flow Matching Interpolation
+            # noisy_latents = (1 - sigma) * latents + sigma * noise
+            noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
+            
+            # Target for Flow Matching is usually (noise - latents)
+            target = noise - latents
             
             # 5. Model Forward (with Adapter injection)
-            # SD3 Transformer input: hidden_states + Adapter Features?
-            # Standard ControlNet adds residuals. 
-            # SD3 ControlNet architecture typically adds to specific blocks.
-            # BUT, we are doing a "Lightweight Injection".
-            # Simplest approach (T2I-Adapter style): Add directly to noisy_latents input?
-            # Or concat? SD3 input is 16 channels. Adapter output is 16 channels.
-            # We can ADD it to the input latents: (noisy_latents + adapter_features)
+            # Ensure proper dtype match for model input
+            # SD3 Transformer input: hidden_states + Adapter Features
+            
+            # Cast inputs to weight_dtype (bf16/fp16)
+            noisy_latents = noisy_latents.to(dtype=weight_dtype)
+            adapter_features = adapter_features.to(dtype=weight_dtype)
             
             model_input = noisy_latents + adapter_features
             
