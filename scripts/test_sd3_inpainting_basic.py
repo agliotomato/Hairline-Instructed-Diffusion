@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 from diffusers import StableDiffusion3Pipeline, FlowMatchEulerDiscreteScheduler
 from tqdm.auto import tqdm
+import torchvision # Added for blending
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Test SD3.5 Basic Inpainting (Latent Blending)")
@@ -19,6 +20,7 @@ def parse_args():
     parser.add_argument("--guidance_scale", type=float, default=5.0) # SD3.5 recommended higher guidance
     parser.add_argument("--strength", type=float, default=1.0, help="Denoising strength (1.0 = Full Inpainting)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--mask_blur", type=float, default=0.0, help="Sigma for Gaussian Blur on mask (e.g. 1.0~3.0)")
     return parser.parse_args()
 
 def main():
@@ -50,6 +52,12 @@ def main():
     
     latent_res = resolution // 8
     mask_latent = torch.nn.functional.interpolate(mask_tensor_full, size=(latent_res, latent_res), mode="nearest")
+
+    # IMPROVEMENT: Mask Blurring for Soft Blending
+    if args.mask_blur > 0:
+        kernel_size = 2 * int(args.mask_blur) + 1
+        mask_latent = torchvision.transforms.functional.gaussian_blur(mask_latent, kernel_size=kernel_size, sigma=args.mask_blur)
+        print(f"Applied Gaussian Blur to mask with sigma={args.mask_blur}")
     
     # 2. Encode Original Image (Init Latents)
     print("Encoding original image...")
