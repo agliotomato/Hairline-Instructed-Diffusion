@@ -28,7 +28,25 @@ class TinyAdapter(nn.Module):
         nn.init.zeros_(self.net[-1].bias)
 
     def forward(self, x):
-        return self.net(x)
+        # x: [B, 1, 128, 128]
+        h = x
+        print(f"[TinyAdapter] Input: {h.shape}")
+        
+        # Layer 1
+        h = self.net[0](h) # Conv
+        h = self.net[1](h) # SiLU
+        print(f"[TinyAdapter] After Layer 1 (Conv+SiLU): {h.shape}")
+        
+        # Layer 2
+        h = self.net[2](h) # Conv
+        h = self.net[3](h) # SiLU
+        print(f"[TinyAdapter] After Layer 2 (Conv+SiLU): {h.shape}")
+        
+        # Layer 3 (Zero Conv)
+        h = self.net[4](h) # Conv 1x1
+        print(f"[TinyAdapter] Output (Zero Conv): {h.shape}")
+        
+        return h
 
 if __name__ == "__main__":
     # Test Dimension
