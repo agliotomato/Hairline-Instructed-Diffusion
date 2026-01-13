@@ -153,8 +153,10 @@ def main():
             # V2 Adapter: Returns 16ch features
             adapter_features = adapter(mask_latent) # [B, 16, 128, 128]
             
-            # Injection
-            model_input = noisy_latents + adapter_features
+            # Injection (Ensure dtype match)
+            # noisy_latents is float32 (from flow matching calc), adapter is bf16 (model output)
+            # Cast both to match Transformer's weight_dtype (bf16)
+            model_input = (noisy_latents + adapter_features).to(dtype=weight_dtype)
             
             # Target (Flow Matching)
             target = noise - latents
