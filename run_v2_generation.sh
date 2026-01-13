@@ -1,22 +1,38 @@
 #!/bin/bash
 
-# V2 Generation for 01047
 python test_sd3_sonic_hybrid_v2.py \
-  --image_path "data/bald_images/01047.png" \
-  --mask_path "data/semantic_masks/01047.png" \
-  --output_path "results/final_hybrid/01047_result_v2.png" \
-  --prompt "a photo of a person with short brown hair"
+  --image_path "data/bald_images/test1.png" \
+  --mask_path "data/semantic_masks/test1.png" \
+  --output_path "results/final_hybrid/test1.png" \
+  --prompt "high quality, realistic hairstyle, detailed texture, 8k"
 
-# V2 Generation for 01056
-python test_sd3_sonic_hybrid_v2.py \
-  --image_path "data/bald_images/01056.png" \
-  --mask_path "data/semantic_masks/01056.png" \
-  --output_path "results/final_hybrid/01056_result_v2.png" \
-  --prompt "a photo of a person with short brown hair"
 
-# V2 Generation for 01057
 python test_sd3_sonic_hybrid_v2.py \
-  --image_path "data/bald_images/01057.png" \
-  --mask_path "data/semantic_masks/01057.png" \
-  --output_path "results/final_hybrid/01057_result_v2.png" \
-  --prompt "a photo of a person with short brown hair"
+  --image_path "data/bald_images/test2.jpg" \
+  --mask_path "data/semantic_masks/test2.jpg" \
+  --output_path "results/final_hybrid/test2.png" \
+  --prompt "high quality, realistic hairstyle, detailed texture, 8k"
+
+
+python test_sd3_sonic_hybrid_v2.py \
+  --image_path "data/bald_images/test3.jpg" \
+  --mask_path "data/semantic_masks/test3.jpg" \
+  --output_path "results/final_hybrid/test3.png" \
+  --prompt "high quality, realistic hairstyle, detailed texture, 8k"
+
+
+python test_sd3_sonic_hybrid_v2.py \
+  --image_path "data/bald_images/test4.jpg" \
+  --mask_path "data/semantic_masks/test4.jpg" \
+  --output_path "results/final_hybrid/test4.png" \
+  --prompt "high quality, realistic hairstyle, detailed texture, 8k"
+
+
+python test_sd3_sonic_hybrid_v2.py \
+  --image_path "data/bald_images/test5.jpg" \
+  --mask_path "data/semantic_masks/test5.jpg" \
+  --output_path "results/final_hybrid/test5.png" \
+  --prompt "high quality, realistic hairstyle, detailed texture, 8k"
+
+
+
