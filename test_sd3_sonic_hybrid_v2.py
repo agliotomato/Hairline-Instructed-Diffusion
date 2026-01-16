@@ -302,12 +302,15 @@ def main():
         # Load Original Image as PIL (clean)
         original_pil = Image.open(args.image_path).convert("RGB").resize(generated_pil.size, Image.BILINEAR)
         
-        # Load Soft Mask as PIL (0-255)
-        # We re-load or use the one we prepared? 
-        # Using the same blur radius logic ensures consistency.
-        mask_pil = Image.open(args.mask_path).convert("L").resize(generated_pil.size, Image.NEAREST)
-        if args.blur_radius > 0:
-            mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(args.blur_radius))
+        # USE THE PROCESSED MASK (mask_highres)
+        # Verify shape [1, 1, H, W] -> Squeeze -> [H, W]
+        # It is BF16, need float32 for PIL
+        mask_tensor_proc = mask_highres[0].float()
+        mask_pil = transforms.ToPILImage()(mask_tensor_proc)
+        
+        # Ensure mask is resized to image size (should be 1024x1024 usually)
+        if mask_pil.size != generated_pil.size:
+            mask_pil = mask_pil.resize(generated_pil.size, Image.BILINEAR)
         
         # Composite
         # final = generated * mask + original * (1 - mask)
