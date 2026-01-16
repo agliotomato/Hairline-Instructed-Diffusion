@@ -107,7 +107,8 @@ def main():
     mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation)        
     
     # DEBUG: Save the processed mask to verify
-    debug_mask_pil = transforms.ToPILImage()(mask_highres[0])
+    # Convert bfloat16 to float32 for PIL conversion
+    debug_mask_pil = transforms.ToPILImage()(mask_highres[0].float())
     debug_mask_pil.save(os.path.join(os.path.dirname(args.output_path), "debug_mask_processed.png"))
     print(f"Saved debug mask to {os.path.join(os.path.dirname(args.output_path), 'debug_mask_processed.png')}")
     
