@@ -2,7 +2,7 @@ import argparse
 import torch
 import torch.nn.functional as F
 from diffusers import StableDiffusion3Pipeline, FlowMatchEulerDiscreteScheduler
-from PIL import Image
+from PIL import Image, ImageFilter
 from torchvision import transforms
 import numpy as np
 from tqdm import tqdm
@@ -23,6 +23,9 @@ def main():
     parser.add_argument("--sonic_lr", type=float, default=0.001)
     parser.add_argument("--inference_steps", type=int, default=50)
     parser.add_argument("--guidance_scale", type=float, default=7.5)
+    parser.add_argument("--adapter_scale", type=float, default=1.0, help="Scale factor for adapter features")
+    parser.add_argument("--soft_blending", action="store_true", help="Enable soft blending at pixel level")
+    parser.add_argument("--blur_radius", type=float, default=5.0, help="Blur radius for soft mask")
     
     args = parser.parse_args()
     
@@ -52,31 +55,51 @@ def main():
         # return as bf16
         return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
-    def load_mask(path, size=(1024, 1024)):
+    def load_mask(path, size=(1024, 1024), blur_radius=0):
         mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
+        
+        # Soft Blending: Blur the mask to create a gradient at the edges
+        if blur_radius > 0:
+            mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+            
         mask_tensor = transforms.ToTensor()(mask).unsqueeze(0).to(device)
-        return (mask_tensor > 0.5).float().to(torch.bfloat16)
+        return mask_tensor.to(torch.bfloat16)
 
     # 3. Prepare Data
     print("Preparing Data...")
     # Inputs are bf16
     original_image = load_image(args.image_path)    
-    mask_highres = load_mask(args.mask_path)        
+    
+    # Use user specified blur for soft blending
+    blur = args.blur_radius if args.soft_blending else 0
+    mask_highres = load_mask(args.mask_path, blur_radius=blur)        
     
     # Encode Original Image (y)
     with torch.no_grad():
         init_latents = pipe.vae.encode(original_image).latent_dist.sample() * pipe.vae.config.scaling_factor
     
     # Prepare Mask for Latent Blending
-    mask_latent = F.interpolate(mask_highres, size=init_latents.shape[-2:], mode="nearest")
+    # SD3 Latents are 1/8th size
+    # Using 'bilinear' to avoid jagged edges in latent space
+    mask_latent = F.interpolate(mask_highres, size=init_latents.shape[-2:], mode="bilinear", align_corners=False)
     
-    # Prepare Mask for Adapter
-    # V2 also takes latend-sized mask
+    # Binarize mask for Adapter? 
+    # Usually adapter works better with binary mask structure, but soft mask might help transitions.
+    # Let's keep adapter mask sharp-ish but bilinear is fine.
     mask_for_adapter = mask_latent.clone()
+    # Optional: Hard threshold for adapter to keep structure strong? 
+    # flow: mask_for_adapter = (mask_for_adapter > 0.5).float() 
+    # Let's try continuous first as V2 was trained on continuous? 
+    # Actually training used 'nearest' resize of binary mask.
+    # To match training distribution better, we might want a sharper mask for the adapter input
+    # but soft mask for blending.
+    # Let's try using the soft mask for adapter too, might help 'seams'.
     
     # Get Adapter Features
     with torch.no_grad():
         adapter_features = adapter(mask_for_adapter) # [1, 16, 128, 128]
+        # Apply Scale
+        adapter_features = adapter_features * args.adapter_scale
     
     # Encode Prompt
     with torch.no_grad():
@@ -222,17 +245,40 @@ def main():
             latents_bg = (1 - sigma_next) * init_latents + sigma_next * noise_bg
             
             # Blend: Keep Generated in Mask (1), Keep Background in (1-Mask)
+            # Use soft mask for smooth transition in latent space
             latents = latents * mask_latent + latents_bg * (1 - mask_latent)
             
     # Decode Final
     with torch.no_grad():
         image = pipe.vae.decode(latents, return_dict=False)[0]
     
-    # Save
-    image = (image / 2 + 0.5).clamp(0, 1)
-    image = image.cpu().permute(0, 2, 3, 1).float().numpy()
-    image = (image * 255).round().astype("uint8")[0]
-    Image.fromarray(image).save(args.output_path)
+    # Normalize Generated Image (Float 0-1)
+    image = (image / 2 + 0.5).clamp(0, 1).cpu().permute(0, 2, 3, 1).float().numpy()[0] # [H, W, 3]
+    generated_pil = Image.fromarray((image * 255).round().astype("uint8"))
+    
+    # ---------------------------------------------------------
+    # Phase 3: Pixel Space Compositing (Final Color Fix)
+    # ---------------------------------------------------------
+    if args.soft_blending:
+        print("Applying Pixel-Space Compositing with Soft Mask...")
+        # Load Original Image as PIL (clean)
+        original_pil = Image.open(args.image_path).convert("RGB").resize(generated_pil.size, Image.BILINEAR)
+        
+        # Load Soft Mask as PIL (0-255)
+        # We re-load or use the one we prepared? 
+        # Using the same blur radius logic ensures consistency.
+        mask_pil = Image.open(args.mask_path).convert("L").resize(generated_pil.size, Image.NEAREST)
+        if args.blur_radius > 0:
+            mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(args.blur_radius))
+        
+        # Composite
+        # final = generated * mask + original * (1 - mask)
+        # PIL.Image.composite(image1, image2, mask) -> image1 where mask is 255
+        final_image = Image.composite(generated_pil, original_pil, mask_pil)
+    else:
+        final_image = generated_pil
+        
+    final_image.save(args.output_path)
     print(f"Saved result to {args.output_path}")
 
 if __name__ == "__main__":
