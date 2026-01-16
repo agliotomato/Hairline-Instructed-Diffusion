@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--adapter_scale", type=float, default=1.0, help="Scale factor for adapter features")
     parser.add_argument("--soft_blending", action="store_true", help="Enable soft blending at pixel level")
     parser.add_argument("--blur_radius", type=float, default=5.0, help="Blur radius for soft mask")
+    parser.add_argument("--mask_dilation", type=int, default=0, help="Dilate mask to allow hair growth (pixels)")
     
     args = parser.parse_args()
     
@@ -55,9 +56,20 @@ def main():
         # return as bf16
         return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
-    def load_mask(path, size=(1024, 1024), blur_radius=0):
+    def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0):
+        # Load mask in L mode (0, 127, 255)
         mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
         
+        # Threshold: Treat only Hair (255) as mask. Ignore Face (127).
+        # Value > 200 (approx 0.8) -> 255, else 0.
+        mask_np = np.array(mask)
+        mask_bin = (mask_np > 200).astype(np.uint8) * 255
+        mask = Image.fromarray(mask_bin)
+        
+        # Optional: Dilate mask to allow hair to grow slightly outside original mask
+        if dilation > 0:
+            mask = mask.filter(ImageFilter.MaxFilter(dilation*2 + 1)) # Approx dilation
+            
         # Soft Blending: Blur the mask to create a gradient at the edges
         if blur_radius > 0:
             mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
@@ -72,7 +84,7 @@ def main():
     
     # Use user specified blur for soft blending
     blur = args.blur_radius if args.soft_blending else 0
-    mask_highres = load_mask(args.mask_path, blur_radius=blur)        
+    mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation)        
     
     # Encode Original Image (y)
     with torch.no_grad():
