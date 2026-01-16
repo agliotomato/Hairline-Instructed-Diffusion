@@ -57,20 +57,40 @@ def main():
         return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
     def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0):
-        # Load mask in L mode (0, 127, 255)
-        mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
+        # Load Raw Mask
+        raw_mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
+        raw_np = np.array(raw_mask)
         
-        # Threshold: Treat only Hair (255) as mask. Ignore Face (127).
-        # Value > 200 (approx 0.8) -> 255, else 0.
-        mask_np = np.array(mask)
-        mask_bin = (mask_np > 200).astype(np.uint8) * 255
-        mask = Image.fromarray(mask_bin)
+        # Define Regions
+        # Hair: 255
+        # Face: 127 (Do not touch!)
+        # Background: 0
         
-        # Optional: Dilate mask to allow hair to grow slightly outside original mask
+        # Hair Mask (Target)
+        hair_mask = (raw_np > 200).astype(np.uint8) # 255
+        
+        # Face Mask (Protection)
+        # 127 area (+ margin of error approx >50 and <200)
+        face_mask = ((raw_np > 50) & (raw_np < 200)).astype(np.uint8) 
+        
         if dilation > 0:
-            mask = mask.filter(ImageFilter.MaxFilter(dilation*2 + 1)) # Approx dilation
+            # 1. Dilate the Hair Mask regularly
+            from PIL import ImageFilter
+            hair_pil = Image.fromarray(hair_mask * 255)
+            # MaxFilter for dilation
+            dilated_pil = hair_pil.filter(ImageFilter.MaxFilter(dilation*2 + 1))
+            dilated_np = np.array(dilated_pil) > 127 # Binary 0/1
             
-        # Soft Blending: Blur the mask to create a gradient at the edges
+            # 2. Key Logic: Subtract Face Mask from Dilated Hair Mask
+            # Prevent expansion into Face area
+            final_mask_np = dilated_np & (~face_mask)
+            
+            # Convert back to 0-255 image
+            mask = Image.fromarray((final_mask_np * 255).astype(np.uint8))
+        else:
+            mask = Image.fromarray((hair_mask * 255).astype(np.uint8))
+            
+        # Soft Blending: Blur
         if blur_radius > 0:
             mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
             
@@ -85,6 +105,11 @@ def main():
     # Use user specified blur for soft blending
     blur = args.blur_radius if args.soft_blending else 0
     mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation)        
+    
+    # DEBUG: Save the processed mask to verify
+    debug_mask_pil = transforms.ToPILImage()(mask_highres[0])
+    debug_mask_pil.save(os.path.join(os.path.dirname(args.output_path), "debug_mask_processed.png"))
+    print(f"Saved debug mask to {os.path.join(os.path.dirname(args.output_path), 'debug_mask_processed.png')}")
     
     # Encode Original Image (y)
     with torch.no_grad():
