@@ -119,23 +119,22 @@ def main():
     # Prepare Mask for Latent Blending
     # SD3 Latents are 1/8th size
     # Using 'bilinear' to avoid jagged edges in latent space
-    mask_latent = F.interpolate(mask_highres, size=init_latents.shape[-2:], mode="bilinear", align_corners=False)
+    # Debug: Save Mask Latent to verify orientation
+    # Normalize to 0-1 for visualization
+    debug_mask_latent = mask_latent.float().cpu().clamp(0, 1)
+    debug_mask_img = transforms.ToPILImage()(debug_mask_latent[0])
+    debug_mask_img.save(os.path.join(os.path.dirname(args.output_path), "debug_mask_latent.png"))
+    print(f"DEBUG: Saved latent mask visualization to debug_mask_latent.png (White=Hair, Black=Background)")
     
-    # Binarize mask for Adapter? 
-    # Usually adapter works better with binary mask structure, but soft mask might help transitions.
-    # Let's keep adapter mask sharp-ish but bilinear is fine.
+    # Define mask for adapter (Reuse latent mask)
     mask_for_adapter = mask_latent.clone()
-    # Optional: Hard threshold for adapter to keep structure strong? 
-    # flow: mask_for_adapter = (mask_for_adapter > 0.5).float() 
-    # Let's try continuous first as V2 was trained on continuous? 
-    # Actually training used 'nearest' resize of binary mask.
-    # To match training distribution better, we might want a sharper mask for the adapter input
-    # but soft mask for blending.
-    # Let's try using the soft mask for adapter too, might help 'seams'.
-    
+
     # Get Adapter Features
     with torch.no_grad():
         adapter_features = adapter(mask_for_adapter) # [1, 16, 128, 128]
+        # DEBUG: Check adapter stats
+        print(f"DEBUG: Adapter Features - Mean: {adapter_features.mean().item():.4f}, Std: {adapter_features.std().item():.4f}, Max: {adapter_features.max().item():.4f}")
+        
         # Apply Scale
         adapter_features = adapter_features * args.adapter_scale
     
@@ -156,6 +155,7 @@ def main():
     print("Starting Phase 1: SONIC Optimization...")
     
     # Init Noise (Optimize in float32 for precision)
+    # CRITICAL: This noise will be reused for texturing AND background blending
     init_noise = torch.randn_like(init_latents, dtype=torch.float32)
     
     init_noise.requires_grad = True
@@ -222,6 +222,11 @@ def main():
     # SONIC output was float32. Cast to bf16 for Generation loop.
     latents = init_noise.detach().clone().to(torch.bfloat16)
     
+    # Fixed Background Noise Source (Crucial for temporal consistency)
+    # We use the optimized init_noise as the base for background noise too!
+    # This ensures the background texture matches the SONIC optimization.
+    noise_bg_base = init_noise.detach().clone().to(torch.bfloat16)
+
     # Manual Denoising Loop
     for i, t in enumerate(progressbar := tqdm(timesteps)):
         # 1. Expand Latents for CFG
@@ -268,19 +273,15 @@ def main():
         if i < len(timesteps) - 1:
             next_t = timesteps[i+1] # Next timestep in the schedule
         
-            # Generate consistent noise instance (simplification: regenerate for now)
-            # Consistent noise is better but stochastic is fine for blending usually.
-            # Using random noise each step for background blending target
-            noise_bg = torch.randn_like(init_latents)
-            
-            # SD3 Flow Matching Manual Noise Addition:
+            # Generate consistent noise instance 
+            # FIX: Use Fixed Noise (init_noise) instead of random re-sampling
             # z_t = (1 - sigma) * x + sigma * noise
             
             # pipe.scheduler.sigmas follows the same order as timesteps
             sigma_next = pipe.scheduler.sigmas[i + 1]
             
-            # Interpolate
-            latents_bg = (1 - sigma_next) * init_latents + sigma_next * noise_bg
+            # Interpolate using Fixed Noise Source
+            latents_bg = (1 - sigma_next) * init_latents + sigma_next * noise_bg_base
             
             # Blend: Keep Generated in Mask (1), Keep Background in (1-Mask)
             # Use soft mask for smooth transition in latent space
