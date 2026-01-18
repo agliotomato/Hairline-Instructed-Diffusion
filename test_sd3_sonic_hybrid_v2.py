@@ -119,6 +119,8 @@ def main():
     # Prepare Mask for Latent Blending
     # SD3 Latents are 1/8th size
     # Using 'bilinear' to avoid jagged edges in latent space
+    mask_latent = F.interpolate(mask_highres, size=init_latents.shape[-2:], mode="bilinear", align_corners=False)
+
     # Debug: Save Mask Latent to verify orientation
     # Normalize to 0-1 for visualization
     debug_mask_latent = mask_latent.float().cpu().clamp(0, 1)
