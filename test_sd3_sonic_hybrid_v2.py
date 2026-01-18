@@ -75,7 +75,7 @@ def main():
         
         if dilation > 0:
             # 1. Dilate the Hair Mask regularly
-            from PIL import ImageFilter
+            # from PIL import ImageFilter <- Removed to fix UnboundLocalError
             hair_pil = Image.fromarray(hair_mask * 255)
             # MaxFilter for dilation
             dilated_pil = hair_pil.filter(ImageFilter.MaxFilter(dilation*2 + 1))
