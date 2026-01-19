@@ -110,11 +110,8 @@ def main():
         sigma = scheduler.sigmas[i]
         sigma = sigma.to(device, dtype=dtype)
         
-        # Create noisy version of original image at this step
-        # Note: We need a noise sample. Let's use a fixed generator or random.
-        # Flow Matching is deterministic ODE usually.
-        # Let's try: Noisy Background = (1-sigma)*x0 + sigma*noise_fixed
-        noise_bg = torch.randn(init_latents.shape, generator=generator, device=device, dtype=dtype) 
+        # Use FIXED noise source for background consistency
+        noise_bg = noise # Use the same noise as initialization 
         
         init_latents_t = (1.0 - sigma) * init_latents + sigma * noise_bg
         
