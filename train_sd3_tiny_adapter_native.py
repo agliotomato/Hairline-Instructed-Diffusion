@@ -140,15 +140,33 @@ def main():
                     latents = pipe.vae.encode(pixel_values).latent_dist.sample()
                     latents = (latents - pipe.vae.config.shift_factor) * pipe.vae.config.scaling_factor
                 
-                # B. Sample Noise & Timesteps
+                # B. Sample Noise & Timesteps (Flow Matching)
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
-                timesteps = torch.randint(0, scheduler.config.num_train_timesteps, (bsz,), device=latents.device).long()
                 
-                # C. Add Noise (Forward Diffusion)
-                # Flow Matching logic: z_t = (1-t)x + t*noise (simplified, SD3 uses scheduler specific)
-                # Let's use scheduler.add_noise which handles SD3 logic (Rectified Flow)
-                noisy_latents = scheduler.add_noise(latents, noise, timesteps)
+                # Sample random times u in [0, 1] - equivalent to sigma in Rectified Flow
+                # Bias towards middle/high noise for better learning? Standard is Uniform.
+                u = torch.rand((bsz,), device=latents.device)
+                
+                # In SD3, timestep is effectively 1000 * (1 - sigma)? Or 1000 * u?
+                # FlowMatchEulerDiscreteScheduler: sigmas go from 1.0 down to 0.0.
+                # timestep 1000 -> sigma 1.0 (noise)
+                # timestep 0 -> sigma 0.0 (image)
+                # So t = u * 1000.
+                # sigma = u (if we define u=1 as noise)
+                # But typically scheduler.sigmas[t] maps t to sigma.
+                # Let's align with SD3 conventions:
+                # t input to model is 0-1000.
+                timesteps = (u * 1000).long()
+                
+                # Sigma for interpolation
+                # We align sigma with u. sigma=0(image), sigma=1(noise).
+                # Noisy = (1-sigma)x + sigma*epsilon
+                # This matches "timestep 1000" being pure noise.
+                sigmas = u.view(bsz, 1, 1, 1)
+                
+                # C. Add Noise (Manual Rectified Flow)
+                noisy_latents = (1.0 - sigmas) * latents + sigmas * noise
                 
                 # D. Adapter Forward (Native Resolution 1024 -> 128)
                 mask = batch["hair_mask"].to(dtype=weight_dtype) 
