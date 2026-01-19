@@ -9,7 +9,11 @@ from diffusers import StableDiffusion3Pipeline, FlowMatchEulerDiscreteScheduler,
 from diffusers.optimization import get_scheduler
 from tqdm.auto import tqdm
 from transformers import CLIPTokenizer, T5TokenizerFast
-import math
+import sys
+import os
+
+# Fix for ModuleNotFoundError when running via accelerate
+sys.path.append(os.getcwd())
 
 # Custom Imports
 from modules.tiny_adapter_native import TinyAdapterNative
