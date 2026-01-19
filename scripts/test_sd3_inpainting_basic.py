@@ -145,7 +145,7 @@ def main():
 
     # 6. Decode
     print("Decoding...")
-    latents = (latents / pipe.vae.config.scaling_factor)
+    latents = (latents / pipe.vae.config.scaling_factor) + pipe.vae.config.shift_factor
     with torch.no_grad():
         image = pipe.vae.decode(latents, return_dict=False)[0]
         
