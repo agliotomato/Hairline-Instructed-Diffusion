@@ -177,6 +177,9 @@ def main():
                 
                 # E. Injection (Additive)
                 model_input = noisy_latents + adapter_features
+                
+                # CASTING: Ensure model_input matches Transformer's dtype (e.g. bf16)
+                model_input = model_input.to(dtype=weight_dtype)
 
                 # F. Text Encoding
                 prompts = batch["prompt"]
