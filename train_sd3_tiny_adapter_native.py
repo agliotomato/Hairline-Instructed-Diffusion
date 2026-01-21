@@ -235,6 +235,8 @@ def main():
                     print(f"Saved checkpoint to {save_path}")
 
     # Final Save
+    if accelerator.is_main_process:
+        save_path = os.path.join(args.output_dir, "tiny_adapter_native_final.pth")
         torch.save(adapter.state_dict(), save_path)
         print(f"Saved final model to {save_path}")
     
