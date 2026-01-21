@@ -46,6 +46,7 @@ def main():
     if accelerator.is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
         print(f"Training TinyAdapterNative on {args.resolution}x{args.resolution} inputs...")
+        accelerator.init_trackers("tiny_adapter_native")
 
     # 2. Load Models
     # Load SD3.5 Components
@@ -222,6 +223,7 @@ def main():
             # Logging
             if global_step % 10 == 0 and accelerator.is_main_process:
                 print(f"Step {global_step} | Loss: {loss.item():.4f}")
+                accelerator.log({"train_loss": loss.item()}, step=global_step)
             
             global_step += 1
             
@@ -233,10 +235,10 @@ def main():
                     print(f"Saved checkpoint to {save_path}")
 
     # Final Save
-    if accelerator.is_main_process:
-        save_path = os.path.join(args.output_dir, "tiny_adapter_native_final.pth")
         torch.save(adapter.state_dict(), save_path)
         print(f"Saved final model to {save_path}")
+    
+    accelerator.end_training()
 
 if __name__ == "__main__":
     main()
