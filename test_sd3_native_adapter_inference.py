@@ -23,6 +23,7 @@ def main():
     parser.add_argument("--prompt", type=str, default="high quality, 8k, realistic hair, detailed texture")
     parser.add_argument("--output_path", type=str, default="results/native_adapter_test/output.png")
     parser.add_argument("--adapter_path", type=str, required=True, help="Path to trained native adapter checkpoint")
+    parser.add_argument("--adapter_mask_path", type=str, default=None, help="Optional: Path to target shape mask (e.g. for long->short generation)")
     parser.add_argument("--sonic_steps", type=int, default=15, help="Number of SONIC optimization steps")
     parser.add_argument("--sonic_lr", type=float, default=0.001)
     parser.add_argument("--inference_steps", type=int, default=50)
@@ -110,9 +111,20 @@ def main():
     mask_latent = F.interpolate(mask_highres, size=init_latents.shape[-2:], mode="bilinear", align_corners=False)
 
     # Prepare Mask for Adapter (High Res Native)
-    # TinyAdapterNative EXPECTS 1024x1024 Input!
-    # No resizing needed here.
-    mask_for_adapter = mask_highres.clone() # [1, 1, 1024, 1024]
+    # Logic: 
+    # - Inpainting Mask (--mask_path): The "Canvas Area" we are allowed to touch (delete old hair + add new hair).
+    # - Adapter Mask (--adapter_mask_path): The "Structural Guide" for the new hair shape.
+    # If adapter_mask_path is not provided, we assume target shape == original shape.
+    
+    if args.adapter_mask_path:
+        print(f"Loading separate Adapter Mask from {args.adapter_mask_path}")
+        # Adapter mask generally shouldn't need dilation aimed at hiding seams, 
+        # but we use standard loading for consistency. 
+        # We assume the user provides a mask representing the TARGET hair shape.
+        mask_for_adapter = load_mask(args.adapter_mask_path, blur_radius=0, dilation=0)
+    else:
+        # Default behavior: Structure follows the editing area
+        mask_for_adapter = mask_highres.clone()
 
     # Get Adapter Features
     with torch.no_grad():
