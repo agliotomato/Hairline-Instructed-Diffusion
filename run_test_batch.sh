@@ -16,7 +16,7 @@ do
       --image_path "test_data/bald_images/test${i}.png" \
       --mask_path "test_data/segmantic_masks/test${i}.png" \
       --adapter_path "$ADAPTER_PATH" \
-      --output_path "${OUTPUT_DIR}/test${i}_result.png" \
+      --output_path "${OUTPUT_DIR}/test${i}_smart.png" \
       --prompt "high quality, realistic hairstyle, detailed hair texture"
       
     echo "Finished test${i}"
