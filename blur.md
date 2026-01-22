@@ -32,7 +32,7 @@ SD3.5 모델의 Native Resolution에 맞춰 학습 해상도를 조정하였습�
 
 ## 4. 비교 표 (SD1.5 vs Before vs Now)
 
-| 구분 | Semantic Mask | SD 1.5 (Legacy) | Before Improvements | Now (SegFace + SD3.5 Native) |
+| 구분 | Semantic Mask | SD 1.5 | Before | Now |
 | :---: | :---: | :---: | :---: | :---: |
 | **test1** | <img src="test_data/segmantic_masks/test1.png" width="256"/> | <img src="results/v4_test_semantic/test1.png" width="256"/> | <img src="results/final_hybrid/test1.png" width="256"/> | <img src="results/native2/test1_smart.png" width="256"/> |
 | **test2** | <img src="test_data/segmantic_masks/test2.png" width="256"/> | [!NoData](<img src="results/v4_test_semantic/test2.png" width="256"/>) | [!NoData](<img src="results/final_hybrid/test2.png" width="256"/>) | <img src="results/native2/test2_smart.png" width="256"/> |
@@ -43,7 +43,7 @@ SD3.5 모델의 Native Resolution에 맞춰 학습 해상도를 조정하였습�
 
 ### 프롬프트 대응능력 비교(adapter 1.5, mask_dilation 10)
 
-| ID | Semantic Mask | Prompt | SD1.5(320ch) | SD3.5(128ch) | SD3.5(256ch) |
+| ID | Semantic Mask | Prompt | SD1.5 | Before | Now |
 | :---: | :---: | :--- | :---: | :---: | :---: |
 | **test1** | <img src="test_data/segmantic_masks/test1.png" width="150"> | "high quality realistic male hairstyle, low skin fade haircut, black hair, clean sides, textured top, dry matte finish, sharp hairline, natural lighting, high detail, 8k" | <img src="results/v4_test_exp/test1_1.png" width="150"> | <img src="results/final_hybrid/test1_1_v2.png" width="150"> | <img src="results/native2/test1_1.png" width="150"> |
 | **test2** | <img src="test_data/segmantic_masks/test1.png" width="150"> | "realistic korean male two block haircut, dark brown hair, soft volume, clean contour, slightly wavy textured fringe, natural shine, high detail, 8k" | <img src="results/v4_test_exp/test1_2.png" width="150"> | <img src="results/final_hybrid/test1_2_v2.png" width="150"> | <img src="results/native2/test1_2.png" width="150"> |
@@ -63,6 +63,7 @@ SD3.5 모델의 Native Resolution에 맞춰 학습 해상도를 조정하였습�
 ## 느낀 점 정리
 1. 이마라인은 비교적 잘 나온다.
 2. 계단 현상이 주요 문제다. 블러를 세게 줘도 효과가 미미했고, 이마라인을 엄격하게 맞추기 위해 어댑터 강도를 높이면 머리 끝부분의 계단 현상이 더 심해지는 것으로 보인다.
-3. 짧은 머리는 잘 나오는데, 데이터 대부분이 짧은 머리라 그 패턴을 더 잘 학습한 영향일 가능성이 있다. 긴 머리는 퀄리티가 떨어지므로 긴 머리 데이터 보강이 필요할 수 있다.
+그 trade-off를 해결할 수 있는 방안? 최적의 어댑터 강도를 찾을 수 있을까?(1.0 ~ 1.5 적당한 것으로 보임)
+3. 짧은 머리는 잘 나오는데, 데이터 대부분이 짧은 머리라 그 패턴을 더 잘 학습한 영향일 가능성이 있다. 긴 머리는 퀄리티가 비교적 떨어지므로 긴 머리 데이터 보강이 필요할 수 있다.
 4. 머리가 잘리는 부분은 dilation으로 보정이 가능하다. 다만 결과적으로 dilation을 쓰면 된다는 것은 알겠지만, 실제로 언제 써야 할지 판단 기준이 필요하다.
 
