@@ -17,7 +17,10 @@ do
       --mask_path "test_data/segmantic_masks/test${i}.png" \
       --adapter_path "$ADAPTER_PATH" \
       --output_path "${OUTPUT_DIR}/test${i}_smart.png" \
-      --prompt "high quality, realistic hairstyle, detailed hair texture"
+      --prompt "high quality, realistic hairstyle, detailed hair texture" \
+      --adapter_scale 1.5 \
+      --mask_dilation 10 \
+      --smart_blur
       
     echo "Finished test${i}"
 done
