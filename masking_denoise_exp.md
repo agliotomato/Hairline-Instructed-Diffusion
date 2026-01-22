@@ -21,36 +21,46 @@ python scripts/test_sd3_inpainting_basic.py \
 *   `--mask_path`: 헤어 영역 마스크 (흰색=생성, 검은색=보존).
 *   `--strength`: `1.0`. 100% 인페인팅을 의미하며, 마스크 영역 내부는 완전히 새로 생성합니다.
 
-## 3. 작동 원리 및 메커니즘 분석 (Operational Principle & Mechanism)
+## 3. Proposed Pipeline: SD 3.5 Hybrid Architecture
 
-이 스크립트는 **Retrieval / Replacement** 전략을 디노이징 루프 내부에 구현한 것으로, Latent Space 내에서 두 개의 서로 다른 확률 과정을 공간적으로 결합(Spatial Composition)하는 원리입니다.
+본 프로젝트가 제안하는 파이프라인은 **SD 3.5의 강력한 생성 능력**, **TinyAdapter의 정밀한 형상 제어**, **SONIC의 초기 노이즈 최적화**, 그리고 **Latent Blending의 배경 보존**을 결합한 하이브리드 아키텍처입니다.
 
-### 3.1. 이중 경로 프로세스 (Dual-Path Process)
-생성 과정은 마스크($M$)를 기준으로 두 가지 서로 다른 궤적(Trajectory)의 상호작용으로 정의됩니다.
+### 3.1. Core Components (핵심 구성 요소)
 
-1.  **생성 경로 (Generative Trajectory, $M=1$)**:
-    *   **역확산 (Reverse Diffusion)**: 마스크 내부(헤어 영역)는 모델 $\epsilon_\theta(z_t, t, c)$의 Score Function에 따라 순수 노이즈로부터 데이터 분포로 수렴해갑니다.
-    *   **역할**: 텍스트 조건($c$)에 부합하는 새로운 헤어 구조와 텍스처를 확률적으로 생성합니다.
+파이프라인은 크게 세 가지 핵심 모듈로 구성됩니다.
 
-2.  **보존 경로 (Constraint Trajectory, $M=0$)**:
-    *   **강제 회귀 (Forced Re-noising)**: 마스크 외부(배경/얼굴)는 매 시점 $t$마다 원본 이미지($x_0$)에 해당 시점의 노이즈($\sigma_t$)를 주입한 상태로 강제 재설정(Reset)됩니다.
-    *   **수식**: $$ z_t^{bg} = \alpha_t \cdot \mathcal{E}(x_0) + \sigma_t \cdot \eta $$
-    *   **역할**: 모델의 예측값 대신 Ground Truth를 사용하여, 배경 정보가 변형(Drift)되는 것을 물리적으로 차단합니다.
+1.  **Geometry Stream (TinyAdapter)**
+    *   **역할**: 헤어 마스크($M$)를 입력받아 **"어디에 머리카락이 있어야 하는지"**에 대한 기하학적 가이드($F_{mask}$)를 생성합니다.
+    *   **특징**: 경량화된 CNN 구조(Tiny Encoder)를 사용하여 SD 3.5의 VRAM 부담을 최소화하면서도, 블러링된 Soft Mask를 통해 자연스러운 헤어라인을 유도합니다.
+    *   **통합 방식(Integration)**: MM-DiT 블록의 Joint Attention 입력단(Before Normalization)에 Feature를 Additive($x + F_{mask}$) 방식으로 주입합니다.
 
-### 3.2. 프로세스 흐름 (Workflow)
+2.  **Texture Initialization (SONIC)**
+    *   **역할**: 무작위 가우시안 노이즈 대신, 원본 이미지의 주파수 특성을 반영한 **최적화된 노이즈($z_T^*$)**를 생성의 시작점으로 사용합니다.
+    *   **효과**: 생성된 헤어 텍스처가 원본 얼굴 피부톤 및 조명과 이질감 없이 조화를 이루도록 합니다.
 
-1.  **초기화 (Initialization)**:
-    *   **원본 인코딩 ($z_{orig}$)**: 대머리 이미지를 VAE로 인코딩 (보존 기준점).
-    *   **노이즈 생성 ($z_T$)**: 생성 시작점. (SONIC 적용 시 최적화된 노이즈 사용)
+3.  **Identity Preservation (Latent Blending)**
+    *   **역할**: 생성 과정(Denoising Loop) 동안 마스크 외부 영역을 원본 이미지의 Latent로 강제 교체(Replacement)합니다.
+    *   **효과**: 얼굴과 배경의 ID Identity가 100% 보존되며, VAE 인코딩/디코딩 과정에서의 손실을 최소화합니다.
 
-2.  **디노이징 및 블렌딩 (Denoising Loop)**:
-    매 Step마다 다음 연산을 수행합니다:
-    *   **Noise Prediction**: 모델이 현재 상태에서 이미지를 예측 ($z_{pred}$).
-    *   **Background Noise Injection**: 원본에 현재 시점의 노이즈를 섞음 ($z_{bg\_t}$).
-    *   **Spatial Composition**: $$ z_{step} = M \cdot z_{pred} + (1 - M) \cdot z_{bg\_t} $$
+### 3.2. Process Workflow (프로세스 흐름)
 
-3.  **디코딩 (Decoding)**:
-    최종 Latent $z_0$는 "새로 생성된 헤어"와 "원본 배경"이 자연스럽게 연결된 상태로 수렴하며, 이를 VAE로 디코딩합니다.
+전체 생성 과정은 다음과 같은 순서로 진행됩니다.
+
+1.  **Preprocessing**:
+    *   **Latent Encoding**: 대머리 원본 이미지($I_{bald}$)를 VAE로 인코딩하여 $z_{orig}$ 생성.
+    *   **Mask Preparation**: 헤어 마스크($M$)를 Latent 크기로 리사이징하고, 경계를 부드럽게 처리(Blurring).
+
+2.  **Noise Optimization (SONIC Step)**:
+    *   $z_{orig}$와 텍스트 프롬프트를 기반으로 짧은 최적화 단계를 수행하여, 배경과 자연스럽게 섞일 수 있는 초기 노이즈 $z_T^*$를 생성합니다.
+
+3.  **Denoising with Dual-Control (Main Loop)**:
+    *   **Step 1: Adapter Injection**: TinyAdapter가 마스크 특징($F_{mask}$)을 추출하여 MM-DiT의 입력 노이즈에 더해줍니다. (Geometry Control).
+    *   **Step 2: Noise Prediction**: SD 3.5 Transformer가 노이즈를 예측($\epsilon_\theta$).
+    *   **Step 3: Latent Blending**: 예측된 Latent에서 마스크 외부(배경/얼굴) 영역을 잘라내고, 원본 이미지에 노이즈를 섞은 $z_{bg}$로 교체합니다.
+        $$ z_{next} = M \cdot z_{pred} + (1-M) \cdot z_{bg} $$
+
+4.  **Final Output**:
+    *   최종 Denoising이 완료된 Latent $z_0$를 VAE Decoding하여 고해상도 이미지를 얻습니다.
 
 ## 4. 개선된 실험: SONIC + Blending Integration
 단순 랜덤 노이즈 대신, **SONIC (Spectral Optimization)** 기술을 적용하여 "배경과 어울리는 초기 노이즈"를 사용하면 훨씬 자연스러운 결과를 얻을 수 있습니다.
@@ -98,8 +108,8 @@ python scripts/test_sd3_sonic_blended.py \
 
 | 구성 요소 | 기술 (Technology) | 역할 및 효과 |
 | :--- | :--- | :--- |
-| **Pre-Step** | **Spectral Seed Optimization** | 배경과 일치하는 최적의 노이즈($z_T^*$)를 확보하여 이질감 원천 봉쇄 |
-| **Identity** | **Latent Blending + Gradient Masking** | 최적화 중 'Drift' 현상을 막고 얼굴/배경을 물리적으로 100% 보존 |
+| **Texture Init** | **Spectral Seed Optimization (SONIC)** | 배경과 일치하는 최적의 노이즈($z_T^*$)를 확보하여 이질감 원천 봉쇄 |
+| **Identity** | **Latent Blending** | 최적화 중 'Drift' 현상을 막고 얼굴/배경을 물리적으로 100% 보존 |
 | **Geometry** | **Tiny Adapter** | **16ch (V1)** vs **128ch (V2)** vs **256ch (V3)**: 마스크 모양을 Latent Space에 주입하여 헤어라인 형상 제어 |
 
 ## 7. Tiny Encoder 
@@ -168,10 +178,34 @@ python scripts/test_sd3_sonic_blended.py \
 
 # SD 1.5 vs SD 3.5 프롬프트 별 Performance 비교
 
-| ID | Bald Input | Semantic Mask | SD1.5(320ch) | SD3.5(128ch) | SD3.5(256ch) |
-| :---: | :---: | :---: | :---: | :---: | :--- |
-| **test1** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | <img src="results/v4_test_exp/test1_1.png" width="150"> | <img src="results/final_hybrid/test1_1_v2.png" width="150"> | <img src="results/final_hybrid/test1_1.png" width="150"><br> |
-| **test2** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | <img src="results/v4_test_exp/test1_2.png" width="150"> | <img src="results/final_hybrid/test1_2_v2.png" width="150"> | <img src="results/final_hybrid/test1_2.png" width="150"><br> |
-| **test3** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | <img src="results/v4_test_exp/test1_3.png" width="150"> | <img src="results/final_hybrid/test1_3_v2.png" width="150"> | <img src="results/final_hybrid/test1_3.png" width="150"><br> |
-| **test4** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | <img src="results/v4_test_exp/test1_4.png" width="150"> | <img src="results/final_hybrid/test1_4_v2.png" width="150"> | <img src="results/final_hybrid/test1_4.png" width="150"><br> |
-| **test5** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | <img src="results/v4_test_exp/test1_5.png" width="150"> | <img src="results/final_hybrid/test1_5_v2.png" width="150"> | <img src="results/final_hybrid/test1_5.png" width="150"><br> |
+| ID | Bald Input | Semantic Mask | Prompt | SD1.5(320ch) | SD3.5(128ch) | SD3.5(256ch) |
+| :---: | :---: | :---: | :--- | :---: | :---: | :--- |
+| **test1** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | "high quality realistic male hairstyle, low skin fade haircut, black hair, clean sides, textured top, dry matte finish, sharp hairline, natural lighting, high detail, 8k" | <img src="results/v4_test_exp/test1_1.png" width="150"> | <img src="results/final_hybrid/test1_1_v2.png" width="150"> | <img src="results/final_hybrid/test1_1.png" width="150"><br> |
+| **test2** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | "realistic korean male two block haircut, dark brown hair, soft volume, clean contour, slightly wavy textured fringe, natural shine, high detail, 8k" | <img src="results/v4_test_exp/test1_2.png" width="150"> | <img src="results/final_hybrid/test1_2_v2.png" width="150"> | <img src="results/final_hybrid/test1_2.png" width="150"><br> |
+| **test3** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | "realistic male textured crop haircut, short fringe, ash gray highlights on dark base, rough texture, slightly tousled top, modern barbershop style, cinematic lighting, ultra-detailed, 8k" | <img src="results/v4_test_exp/test1_3.png" width="150"> | <img src="results/final_hybrid/test1_3_v2.png" width="150"> | <img src="results/final_hybrid/test1_3.png" width="150"><br> |
+| **test4** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | "realistic male hairstyle, natural perm with soft waves, medium length fringe pushed slightly forward, subtle brown highlights, airy movement, fluffy texture, high detail, 8k" | <img src="results/v4_test_exp/test1_4.png" width="150"> | <img src="results/final_hybrid/test1_4_v2.png" width="150"> | <img src="results/final_hybrid/test1_4.png" width="150"><br> |
+| **test5** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | "realistic male slicked back hairstyle, blonde hair color, wet glossy texture, strong hold finish, clean sides, sharp edges, modern gentleman style, high fidelity detail, 8k" | <img src="results/v4_test_exp/test1_5.png" width="150"> | <img src="results/final_hybrid/test1_5_v2.png" width="150"> | <img src="results/final_hybrid/test1_5.png" width="150"><br> |
+
+## 8. 학습 목표 (Training Objective)
+
+**Native Adapter** 학습에는 Stable Diffusion 3.5의 핵심 메커니즘인 **Flow Matching** 기반의 Loss를 사용합니다.
+
+### 8.1. Flow Matching Operator
+SD 3.5는 기존 DDPM(노이즈 예측)이 아닌 **Rectified Flow** 방식을 사용합니다. 이는 데이터($x_0$)와 노이즈($x_1$) 사이를 잇는 **가장 직선적인 경로(Straight Path)**를 학습하는 것을 목표로 합니다.
+
+*   **Forward Process (Noise Addition)**:
+    $$ z_t = (1 - \sigma_t) \cdot x_0 + \sigma_t \cdot \epsilon $$
+    *   $\sigma_t \in [0, 1]$: 시간 $t$에 따른 보간 비율.
+    *   $t=0 \to z_0 = x_0$ (이미지)
+    *   $t=1 \to z_1 = \epsilon$ (노이즈)
+
+### 8.2. Loss Function (MSE)
+모델(Transformer)은 현재 상태 $z_t$에서 **노이즈 쪽으로 향하는 속도 벡터(Velocity Field, $v$)**를 예측하도록 학습됩니다.
+
+$$ L = || v_{pred} - v_{target} ||^2 = || \text{Transformer}(z_t, t, c) - (\epsilon - x_0) ||^2 $$
+
+*   **$v_{target} = \epsilon - x_0$**: 원본 이미지에서 노이즈로 가는 방향 벡터.
+*   **$v_{pred}$**: 모델이 예측한 방향.
+*   **의미**: "TinyAdapter가 준 힌트(Mask Feature)를 참고했을 때, 모델이 **올바른 방향($\epsilon - x_0$)**으로 가고 있는가?"를 측정합니다.
+
+즉, 우리가 사용하는 Loss는 **예측된 벡터와 실제 벡터 사이의 거리(Mean Squared Error)**입니다. 이 값이 0에 가까워질수록 모델은 마스크 힌트를 잘 이해하고 올바른 이미지를 생성하게 됩니다.
