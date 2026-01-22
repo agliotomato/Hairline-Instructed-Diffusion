@@ -32,6 +32,7 @@ def main():
     parser.add_argument("--soft_blending", action="store_true", help="Enable soft blending at pixel level")
     parser.add_argument("--blur_radius", type=float, default=5.0, help="Blur radius for soft mask")
     parser.add_argument("--mask_dilation", type=int, default=0, help="Dilate mask to allow hair growth (pixels)")
+    parser.add_argument("--smart_blur", action="store_true", help="Apply heavy blur except for the hairline area")
     
     args = parser.parse_args()
     
@@ -69,7 +70,7 @@ def main():
         # return as bf16
         return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
-    def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0):
+    def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0, smart_blur=False):
         # Load Raw Mask
         raw_mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
         raw_np = np.array(raw_mask)
@@ -90,7 +91,32 @@ def main():
         else:
             mask = Image.fromarray((hair_mask * 255).astype(np.uint8))
             
-        if blur_radius > 0:
+        if smart_blur and blur_radius > 0:
+             print(f"Applying Smart Blur (Sharp Hairline, Soft Volume)...")
+             # 1. Heavy Blur for Outer Shape (Volume)
+             # Apply 4x blur radius for the outer fluffiness
+             heavy_radius = blur_radius * 4.0
+             mask_heavy = mask.filter(ImageFilter.GaussianBlur(heavy_radius))
+             
+             # 2. Light Blur for Hairline (Precision)
+             # Keep the original radius for the hairline part
+             mask_light = mask.filter(ImageFilter.GaussianBlur(blur_radius))
+             
+             # 3. Create Mixing Alpha (Protection Zone)
+             # We want to protect the Hairline. The Hairline is where Hair meets Face.
+             # We dilate the FACE mask to overlap with the hair start.
+             # 30 pixels dilation should cover the transition zone.
+             face_pil = Image.fromarray((face_mask * 255).astype(np.uint8))
+             protection_zone = face_pil.filter(ImageFilter.MaxFilter(41)) # 20px dilation approx
+             # Blur the protection zone for smooth transition
+             protection_zone = protection_zone.filter(ImageFilter.GaussianBlur(15))
+             
+             # 4. Composite
+             # Where protection_zone is White (Near Face), use mask_light.
+             # Where protection_zone is Black (Far from Face), use mask_heavy.
+             mask = Image.composite(mask_light, mask_heavy, protection_zone)
+             
+        elif blur_radius > 0:
             mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
             
         mask_tensor = transforms.ToTensor()(mask).unsqueeze(0).to(device)
@@ -101,7 +127,7 @@ def main():
     original_image = load_image(args.image_path)    
     
     blur = args.blur_radius if args.soft_blending else 0
-    mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation)        
+    mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur)        
     
     # Prepare Mask for Latent Blending (Low Res for Blending)
     # SD3 Latents are 1/8th size
