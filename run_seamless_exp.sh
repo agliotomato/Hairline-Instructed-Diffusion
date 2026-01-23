@@ -33,7 +33,8 @@ do
               --smart_blur \
               --soft_blending \
               --blur_radius $blur \
-              --mask_dilation $dil
+              --mask_dilation $dil \
+              --save_mask_preview
         done
     done
 done
