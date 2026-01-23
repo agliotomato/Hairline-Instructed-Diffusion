@@ -91,9 +91,9 @@ python scripts/test_sd3_sonic_blended.py \
 
 | ID | Bald Image (Source) | Semantic Mask | Initial | SONIC |
 | :---: | :---: | :---: | :---: | :---: |
-| **01047** | ![Bald](data/bald_images/01047.png) | ![Mask](data/semantic_masks/01047.png) | ![Initial](results/denoise_exp/01047_fixed.png) | ![SONIC](results/sonic/01047_blended.png) |
-| **01056** | ![Bald](data/bald_images/01056.png) | ![Mask](data/semantic_masks/01056.png) | ![Initial](results/denoise_exp/01056_fixed.png) | ![SONIC](results/sonic/01056_blended.png) |
-| **01057** | ![Bald](data/bald_images/01057.png) | ![Mask](data/semantic_masks/01057.png) | ![Initial](results/denoise_exp/01057_fixed.png) | ![SONIC](results/sonic/01057_blended.png) |
+| **01047** | ![Bald](data/bald_images/01047.png) | ![Mask](data/segmantic_masks/01047.png) | ![Initial](results/denoise_exp/01047_fixed.png) | ![SONIC](results/sonic/01047_blended.png) |
+| **01056** | ![Bald](data/bald_images/01056.png) | ![Mask](data/segmantic_masks/01056.png) | ![Initial](results/denoise_exp/01056_fixed.png) | ![SONIC](results/sonic/01056_blended.png) |
+| **01057** | ![Bald](data/bald_images/01057.png) | ![Mask](data/segmantic_masks/01057.png) | ![Initial](results/denoise_exp/01057_fixed.png) | ![SONIC](results/sonic/01057_blended.png) |
 
 ## 6. 결론
 
@@ -160,9 +160,9 @@ python scripts/test_sd3_sonic_blended.py \
 
 | Input Image | Mask | **16ch Adapter (V1)** | **128ch Adapter (V2)** | **256ch Adapter (V3)** |
 | :---: | :---: | :---: | :---: | :---: |
-| <img src="data/bald_images/01047.png" width="150"> | <img src="data/semantic_masks/01047.png" width="150"> | <img src="results/final_hybrid/01047_result.png" width="150"> | <img src="results/final_hybrid/01047_result_v2.png" width="150"> | <img src="results/final_hybrid/01047_v3.png" width="150"> |
-| <img src="data/bald_images/01056.png" width="150"> | <img src="data/semantic_masks/01056.png" width="150"> | <img src="results/final_hybrid/01056_result.png" width="150"> | <img src="results/final_hybrid/01056_result_v2.png" width="150"> | <img src="results/final_hybrid/01056_v3.png" width="150"> |
-| <img src="data/bald_images/01057.png" width="150"> | <img src="data/semantic_masks/01057.png" width="150"> | <img src="results/final_hybrid/01057_result.png" width="150"> | <img src="results/final_hybrid/01057_result_v2.png" width="150"> | <img src="results/final_hybrid/01057_v3.png" width="150"> |
+| <img src="data/bald_images/01047.png" width="150"> | <img src="data/segmantic_masks/01047.png" width="150"> | <img src="results/final_hybrid/01047_result.png" width="150"> | <img src="results/final_hybrid/01047_result_v2.png" width="150"> | <img src="results/final_hybrid/01047_v3.png" width="150"> |
+| <img src="data/bald_images/01056.png" width="150"> | <img src="data/segmantic_masks/01056.png" width="150"> | <img src="results/final_hybrid/01056_result.png" width="150"> | <img src="results/final_hybrid/01056_result_v2.png" width="150"> | <img src="results/final_hybrid/01056_v3.png" width="150"> |
+| <img src="data/bald_images/01057.png" width="150"> | <img src="data/segmantic_masks/01057.png" width="150"> | <img src="results/final_hybrid/01057_result.png" width="150"> | <img src="results/final_hybrid/01057_result_v2.png" width="150"> | <img src="results/final_hybrid/01057_v3.png" width="150"> |
 
 # SD 1.5 vs SD 3.5 Performance 비교(Test Data)
 
@@ -170,11 +170,11 @@ python scripts/test_sd3_sonic_blended.py \
 
 | ID | Bald Input | Semantic Mask | SD1.5(320ch) | SD3.5(128ch) | SD3.5(256ch) |
 | :---: | :---: | :---: | :---: | :---: | :--- |
-| **test1** | <img src="data/bald_images/test1.png" width="150"> | <img src="data/semantic_masks/test1.png" width="150"> | <img src="results/v4_test_semantic/test1.png" width="150"> | <img src="results/final_hybrid/test1.png" width="150"> | <img src="results/final_hybrid/test1_v3.png" width="150"><br> |
-| **test2** | <img src="data/bald_images/test2.jpg" width="150"> | <img src="data/semantic_masks/test2.jpg" width="150"> | <img src="results/v4_test_semantic/test2.png" width="150"> | <img src="results/final_hybrid/test2.png" width="150"> | <img src="results/final_hybrid/test2_v3.png" width="150"><br> |
-| **test3** | <img src="data/bald_images/test3.jpg" width="150"> | <img src="data/semantic_masks/test3.jpg" width="150"> | <img src="results/v4_test_semantic/test3.png" width="150"> | <img src="results/final_hybrid/test3.png" width="150"> | <img src="results/final_hybrid/test3_v3.png" width="150"><br> |
-| **test4** | <img src="data/bald_images/test4.jpg" width="150"> | <img src="data/semantic_masks/test4.jpg" width="150"> | <img src="results/v4_test_semantic/test4.png" width="150"> | <img src="results/final_hybrid/test4.png" width="150"> | <img src="results/final_hybrid/test4_v3.png" width="150"><br> |
-| **test5** | <img src="data/bald_images/test5.jpg" width="150"> | <img src="data/semantic_masks/test5.jpg" width="150"> | <img src="results/v4_test_semantic/test5.png" width="150"> | <img src="results/final_hybrid/test5.png" width="150"> | <img src="results/final_hybrid/test5_v3.png" width="150"><br> |
+| **test1** | <img src="test_data/bald_images/test1.png" width="150"> | <img src="test_data/segmantic_masks/test1.png" width="150"> | <img src="results/v4_test_semantic/test1.png" width="150"> | <img src="results/final_hybrid/test1.png" width="150"> | <img src="results/final_hybrid/test1_v3.png" width="150"><br> |
+| **test2** | <img src="test_data/bald_images/test2.jpg" width="150"> | <img src="test_data/segmantic_masks/test2.jpg" width="150"> | <img src="results/v4_test_semantic/test2.png" width="150"> | <img src="results/final_hybrid/test2.png" width="150"> | <img src="results/final_hybrid/test2_v3.png" width="150"><br> |
+| **test3** | <img src="test_data/bald_images/test3.jpg" width="150"> | <img src="test_data/segmantic_masks/test3.jpg" width="150"> | <img src="results/v4_test_semantic/test3.png" width="150"> | <img src="results/final_hybrid/test3.png" width="150"> | <img src="results/final_hybrid/test3_v3.png" width="150"><br> |
+| **test4** | <img src="test_data/bald_images/test4.jpg" width="150"> | <img src="test_data/segmantic_masks/test4.jpg" width="150"> | <img src="results/v4_test_semantic/test4.png" width="150"> | <img src="results/final_hybrid/test4.png" width="150"> | <img src="results/final_hybrid/test4_v3.png" width="150"><br> |
+| **test5** | <img src="test_data/bald_images/test5.jpg" width="150"> | <img src="test_data/segmantic_masks/test5.jpg" width="150"> | <img src="results/v4_test_semantic/test5.png" width="150"> | <img src="results/final_hybrid/test5.png" width="150"> | <img src="results/final_hybrid/test5_v3.png" width="150"><br> |
 
 # SD 1.5 vs SD 3.5 프롬프트 별 Performance 비교
 
