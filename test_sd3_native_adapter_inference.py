@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--blur_radius", type=float, default=5.0, help="Blur radius for soft mask")
     parser.add_argument("--mask_dilation", type=int, default=0, help="Dilate mask to allow hair growth (pixels)")
     parser.add_argument("--smart_blur", action="store_true", help="Apply heavy blur except for the hairline area")
+    parser.add_argument("--save_mask_preview", action="store_true", help="Save processed hair mask preview image")
     
     args = parser.parse_args()
     
@@ -128,6 +129,12 @@ def main():
     
     blur = args.blur_radius if args.soft_blending else 0
     mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur)        
+    if args.save_mask_preview:
+        mask_preview = transforms.ToPILImage()(mask_highres[0].float().cpu())
+        mask_base, mask_ext = os.path.splitext(args.output_path)
+        mask_preview_path = f"{mask_base}_mask{mask_ext or '.png'}"
+        mask_preview.save(mask_preview_path)
+        print(f"Saved mask preview to {mask_preview_path}")
     
     # Prepare Mask for Latent Blending (Low Res for Blending)
     # SD3 Latents are 1/8th size
