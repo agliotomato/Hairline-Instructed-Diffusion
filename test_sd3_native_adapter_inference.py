@@ -210,7 +210,7 @@ def main():
         pred_x0 = init_noise - model_pred.to(torch.float32)
         
         target_latents = init_latents.to(torch.float32)
-        mask_float = mask_latent.to(torch.float32)
+        mask_float = (mask_latent > 0.01).to(torch.float32)
         
         loss = F.mse_loss(
             pred_x0 * (1 - mask_float), 
