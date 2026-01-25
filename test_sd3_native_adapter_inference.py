@@ -146,7 +146,8 @@ def main():
     print("Preparing Data...")
     original_image = load_image(args.image_path)    
     
-    blur = args.blur_radius if args.soft_blending else 0
+    # Pass blur_radius if Soft Blending OR Smart Blur is enabled
+    blur = args.blur_radius if (args.soft_blending or args.smart_blur) else 0
     mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur, output_dir=os.path.dirname(args.output_path))        
     if args.save_mask_preview:
         mask_preview = transforms.ToPILImage()(mask_highres[0].float().cpu())
