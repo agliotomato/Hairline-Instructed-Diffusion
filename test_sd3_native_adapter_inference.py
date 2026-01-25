@@ -126,7 +126,14 @@ def main():
              
              # 4. Composite
              # Use Heavy where Core is active, Light elsewhere
+             # 4. Composite
+             # Use Heavy where Core is active, Light elsewhere
              mask = Image.composite(mask_heavy, mask_light, core_smooth)
+
+             # DEBUG (V2): Save the actual mask being sent to the adapter
+             debug_save_path = f"debug_smart_mask_input_{os.path.basename(path)}"
+             mask.save(debug_save_path)
+             print(f"[DEBUG] Saved Smart Blur Mask to {debug_save_path}")
              
         elif blur_radius > 0:
             mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
