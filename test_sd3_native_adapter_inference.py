@@ -149,7 +149,9 @@ def main():
         # We stretch the intensity so the maximum value hits 1.0 (255) again.
         mask_max = mask_tensor.max()
         if mask_max > 0:
+            print(f"DEBUG: Mask Max Intensity before Norm: {mask_max:.4f}")
             mask_tensor = mask_tensor / mask_max
+            print(f"DEBUG: Mask Max Intensity after Norm: {mask_tensor.max():.4f}")
             
         return mask_tensor.to(torch.bfloat16)
 
