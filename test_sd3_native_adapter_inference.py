@@ -74,8 +74,8 @@ def main():
 
     def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0, smart_blur=False):
         # Load Raw Mask
-        # Use LANCZOS for mask resizing too (as requested), but handle thresholding carefully
-        raw_mask = Image.open(path).convert("L").resize(size, Image.LANCZOS)
+        # Revert to NEAREST for mask to avoid Lanczos ringing artifacts when thresholding
+        raw_mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
         raw_np = np.array(raw_mask)
         
         # Define Regions
