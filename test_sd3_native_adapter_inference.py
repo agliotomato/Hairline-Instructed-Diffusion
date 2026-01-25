@@ -100,7 +100,10 @@ def main():
         if smart_blur and blur_radius > 0:
              print(f"Applying Smart Blur V2 (Erosion-based Protection)...")
              # 1. Heavy Blur for Volume
-             heavy_radius = blur_radius * 4.0
+             # V3 Refinement: Removed 4.0x multiplier.
+             # Previous 20.0px blur caused "helmet hair" on adapter trained with sharp masks.
+             # Now using user-provided radius (e.g. 5.0) directly.
+             heavy_radius = blur_radius
              mask_heavy = mask.filter(ImageFilter.GaussianBlur(heavy_radius))
              
              # 2. Light Blur for Details (Hairline, Sideburns)
