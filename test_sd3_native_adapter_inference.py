@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--mask_dilation", type=int, default=0, help="Dilate mask to allow hair growth (pixels)")
     parser.add_argument("--smart_blur", action="store_true", help="Apply heavy blur except for the hairline area")
     parser.add_argument("--save_mask_preview", action="store_true", help="Save processed hair mask preview image")
-    parser.add_argument("--edge_blur_limit", type=float, default=1.0, help="Maximum blur radius for edge/detail areas (Smart Blur)")
+    parser.add_argument("--edge_blur_limit", type=float, default=0.8, help="Maximum blur radius for edge/detail areas (Smart Blur)")
     
     args = parser.parse_args()
     
