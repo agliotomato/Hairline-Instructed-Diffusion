@@ -72,7 +72,7 @@ def main():
         # return as bf16
         return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
-    def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0, smart_blur=False):
+    def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0, smart_blur=False, output_dir="."):
         # Load Raw Mask
         # Revert to NEAREST for mask to avoid Lanczos ringing artifacts when thresholding
         raw_mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
@@ -131,7 +131,7 @@ def main():
              mask = Image.composite(mask_heavy, mask_light, core_smooth)
 
              # DEBUG (V2): Save the actual mask being sent to the adapter
-             debug_save_path = f"debug_smart_mask_input_{os.path.basename(path)}"
+             debug_save_path = os.path.join(output_dir, f"debug_smart_mask_input_{os.path.basename(path)}")
              mask.save(debug_save_path)
              print(f"[DEBUG] Saved Smart Blur Mask to {debug_save_path}")
              
@@ -146,7 +146,7 @@ def main():
     original_image = load_image(args.image_path)    
     
     blur = args.blur_radius if args.soft_blending else 0
-    mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur)        
+    mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur, output_dir=os.path.dirname(args.output_path))        
     if args.save_mask_preview:
         mask_preview = transforms.ToPILImage()(mask_highres[0].float().cpu())
         mask_base, mask_ext = os.path.splitext(args.output_path)
