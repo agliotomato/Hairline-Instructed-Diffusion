@@ -62,14 +62,14 @@ class HairlineDatasetV2(Dataset):
         self.resolution = resolution
         self.image_transform = transforms.Compose(
             [
-                transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.LANCZOS),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
             ]
         )
         self.mask_transform = transforms.Compose(
             [
-                transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.LANCZOS),
                 transforms.ToTensor(),
             ]
         )

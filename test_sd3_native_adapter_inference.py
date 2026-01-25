@@ -6,6 +6,7 @@ from diffusers import StableDiffusion3Pipeline, FlowMatchEulerDiscreteScheduler
 from PIL import Image, ImageFilter
 from torchvision import transforms
 import numpy as np
+from scipy.ndimage import binary_erosion
 from tqdm import tqdm
 import os
 import sys
@@ -67,13 +68,14 @@ def main():
     
     # 2. Helper Functions
     def load_image(path, size=(1024, 1024)):
-        img = Image.open(path).convert("RGB").resize(size, Image.BILINEAR)
+        img = Image.open(path).convert("RGB").resize(size, Image.LANCZOS)
         # return as bf16
         return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
     def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0, smart_blur=False):
         # Load Raw Mask
-        raw_mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
+        # Use LANCZOS for mask resizing too (as requested), but handle thresholding carefully
+        raw_mask = Image.open(path).convert("L").resize(size, Image.LANCZOS)
         raw_np = np.array(raw_mask)
         
         # Define Regions
@@ -93,29 +95,34 @@ def main():
             mask = Image.fromarray((hair_mask * 255).astype(np.uint8))
             
         if smart_blur and blur_radius > 0:
-             print(f"Applying Smart Blur (Sharp Hairline, Soft Volume)...")
-             # 1. Heavy Blur for Outer Shape (Volume)
-             # Apply 4x blur radius for the outer fluffiness
+             print(f"Applying Smart Blur V2 (Erosion-based Protection)...")
+             # 1. Heavy Blur for Volume
              heavy_radius = blur_radius * 4.0
              mask_heavy = mask.filter(ImageFilter.GaussianBlur(heavy_radius))
              
-             # 2. Light Blur for Hairline (Precision)
-             # Keep the original radius for the hairline part
+             # 2. Light Blur for Details (Hairline, Sideburns)
              mask_light = mask.filter(ImageFilter.GaussianBlur(blur_radius))
              
-             # 3. Create Mixing Alpha (Protection Zone)
-             # We want to protect the Hairline. The Hairline is where Hair meets Face.
-             # We dilate the FACE mask to overlap with the hair start.
-             # 30 pixels dilation should cover the transition zone.
-             face_pil = Image.fromarray((face_mask * 255).astype(np.uint8))
-             protection_zone = face_pil.filter(ImageFilter.MaxFilter(41)) # 20px dilation approx
-             # Blur the protection zone for smooth transition
-             protection_zone = protection_zone.filter(ImageFilter.GaussianBlur(15))
+             # 3. Create Core Mask (Erosion)
+             # Identify "thick" areas where heavy blur is safe.
+             erosion_size = int(heavy_radius)
+             y, x = np.ogrid[-erosion_size:erosion_size+1, -erosion_size:erosion_size+1]
+             struct = x*x + y*y <= erosion_size*erosion_size
+             
+             # hair_mask is boolean 0/1 from earlier
+             # (hair_mask > 200) was used to create 'mask' but we need the bool array
+             # In logical terms: hair_mask (from line 81) is uint8 0 or 1.
+             hair_bool = (hair_mask > 0)
+             
+             core_mask_np = binary_erosion(hair_bool, structure=struct)
+             core_pil = Image.fromarray((core_mask_np * 255).astype(np.uint8))
+             
+             # Smooth the Core Mask transition
+             core_smooth = core_pil.filter(ImageFilter.GaussianBlur(blur_radius * 2))
              
              # 4. Composite
-             # Where protection_zone is White (Near Face), use mask_light.
-             # Where protection_zone is Black (Far from Face), use mask_heavy.
-             mask = Image.composite(mask_light, mask_heavy, protection_zone)
+             # Use Heavy where Core is active, Light elsewhere
+             mask = Image.composite(mask_heavy, mask_light, core_smooth)
              
         elif blur_radius > 0:
             mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
