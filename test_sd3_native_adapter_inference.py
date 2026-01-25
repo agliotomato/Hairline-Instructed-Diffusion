@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--mask_dilation", type=int, default=0, help="Dilate mask to allow hair growth (pixels)")
     parser.add_argument("--smart_blur", action="store_true", help="Apply heavy blur except for the hairline area")
     parser.add_argument("--save_mask_preview", action="store_true", help="Save processed hair mask preview image")
+    parser.add_argument("--edge_blur_limit", type=float, default=1.0, help="Maximum blur radius for edge/detail areas (Smart Blur)")
     
     args = parser.parse_args()
     
@@ -74,7 +75,7 @@ def main():
         # return as bf16
         return (transforms.ToTensor()(img).unsqueeze(0).to(device) * 2.0 - 1.0).to(torch.bfloat16)
 
-    def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0, smart_blur=False, output_dir="."):
+    def load_mask(path, size=(1024, 1024), blur_radius=0, dilation=0, smart_blur=False, output_dir=".", edge_limit=1.0):
         # Load Raw Mask
         # Revert to NEAREST for mask to avoid Lanczos ringing artifacts when thresholding
         raw_mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
@@ -108,8 +109,8 @@ def main():
              
              # 2. Light Blur for Details (Hairline, Sideburns)
              # V2 Improvement: "Thin" areas vanish with large blur.
-             # Lowered cap to 1.0 (from 2.0) to ensure very thin strands maintain intensity.
-             light_radius = min(blur_radius, 1.0)
+             # Cap to user specified limit (default 1.0)
+             light_radius = min(blur_radius, edge_limit)
              mask_light = mask.filter(ImageFilter.GaussianBlur(light_radius))
              
              # 3. Create Core Mask (Erosion)
@@ -160,7 +161,7 @@ def main():
     
     # Pass blur_radius if Soft Blending OR Smart Blur is enabled
     blur = args.blur_radius if (args.soft_blending or args.smart_blur) else 0
-    mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur, output_dir=os.path.dirname(args.output_path))        
+    mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur, output_dir=os.path.dirname(args.output_path), edge_limit=args.edge_blur_limit)        
     if args.save_mask_preview:
         mask_preview = transforms.ToPILImage()(mask_highres[0].float().cpu())
         mask_base, mask_ext = os.path.splitext(args.output_path)
