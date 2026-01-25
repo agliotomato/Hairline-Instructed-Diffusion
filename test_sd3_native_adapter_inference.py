@@ -42,6 +42,8 @@ def main():
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     
     # 1. Setup Device & Model
+    print("!!! RUNNING UPDATED SCRIPT WITH DEBUG LOGIC !!!")
+    print(f"DEBUG: Smart Blur={args.smart_blur}, Blur Radius={args.blur_radius}, Adapter Scale={args.adapter_scale}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on {device}")
     
@@ -77,6 +79,7 @@ def main():
         # Revert to NEAREST for mask to avoid Lanczos ringing artifacts when thresholding
         raw_mask = Image.open(path).convert("L").resize(size, Image.NEAREST)
         raw_np = np.array(raw_mask)
+        print(f"DEBUG: Inside load_mask. Smart Blur={smart_blur}, Radius={blur_radius}")
         
         # Define Regions
         # Hair: > 200 (255)
@@ -124,8 +127,6 @@ def main():
              # Smooth the Core Mask transition
              core_smooth = core_pil.filter(ImageFilter.GaussianBlur(blur_radius * 2))
              
-             # 4. Composite
-             # Use Heavy where Core is active, Light elsewhere
              # 4. Composite
              # Use Heavy where Core is active, Light elsewhere
              mask = Image.composite(mask_heavy, mask_light, core_smooth)
