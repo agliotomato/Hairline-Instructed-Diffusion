@@ -107,10 +107,9 @@ def main():
              mask_heavy = mask.filter(ImageFilter.GaussianBlur(heavy_radius))
              
              # 2. Light Blur for Details (Hairline, Sideburns)
-             # V2 Improvement: "Thin" areas vanish with large blur (e.g. 5.0).
-             # We must cap the blur for Detail/Edge zones to a safe Anti-aliasing amount (e.g., 2.0).
-             # Use the smaller of (user_radius, 2.0) to ensure thin parts survive.
-             light_radius = min(blur_radius, 2.0)
+             # V2 Improvement: "Thin" areas vanish with large blur.
+             # Lowered cap to 1.0 (from 2.0) to ensure very thin strands maintain intensity.
+             light_radius = min(blur_radius, 1.0)
              mask_light = mask.filter(ImageFilter.GaussianBlur(light_radius))
              
              # 3. Create Core Mask (Erosion)
