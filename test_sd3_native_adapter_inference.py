@@ -143,6 +143,14 @@ def main():
             mask = mask.filter(ImageFilter.GaussianBlur(blur_radius))
             
         mask_tensor = transforms.ToTensor()(mask).unsqueeze(0).to(device)
+        # Normalization Step (Vital for blurred masks)
+        # Blurring reduces peak intensity (e.g. 255 -> 150).
+        # If the adapter expects ~1.0 (255) inputs, this drop causes "weak generation" or "ignored areas".
+        # We stretch the intensity so the maximum value hits 1.0 (255) again.
+        mask_max = mask_tensor.max()
+        if mask_max > 0:
+            mask_tensor = mask_tensor / mask_max
+            
         return mask_tensor.to(torch.bfloat16)
 
     # 3. Prepare Data
