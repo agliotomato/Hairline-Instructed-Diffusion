@@ -8,7 +8,7 @@
 # Ensure accelerate is configured or remove 'accelerate launch' if running directly (but script uses accelerate)
 # If config is missing, run: accelerate config default
 
-echo "Starting Mixed Training (70:30)..."
+echo "Starting Training with SDF Strategy..."
 
 accelerate launch train_sd3_tiny_adapter_native.py \
   --orig_dir "data/original_images" \
@@ -18,5 +18,5 @@ accelerate launch train_sd3_tiny_adapter_native.py \
   --train_batch_size 2 \
   --num_train_epochs 100 \
   --learning_rate 1e-4 \
-  --output_dir "output/tiny_adapter_mixed_7030" \
+  --output_dir "output/tiny_adapter_sdf_tanh" \
   --mixed_precision "bf16"
