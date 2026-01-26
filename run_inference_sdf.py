@@ -101,7 +101,7 @@ def main():
         
     # Clean Latents (Start Noise)
     generator = torch.Generator(device).manual_seed(args.seed)
-    latents = torch.randn_like(bg_latents, generator=generator)
+    latents = torch.randn(bg_latents.shape, generator=generator, device=device, dtype=bg_latents.dtype)
     
     # Encode Prompt
     (prompt_embeds, negative_prompt_embeds, 
@@ -133,7 +133,7 @@ def main():
             # But x_t_background needs to be noisy.
             # SD3 Scheduler usually provides 'sigmas'.
             sigma = pipe.scheduler.sigmas[i]
-            noise = torch.randn_like(bg_latents, generator=generator) # Fixed noise for consistency?
+            noise = torch.randn(bg_latents.shape, generator=generator, device=device, dtype=bg_latents.dtype) # Fixed noise for consistency?
             # Ideally use same noise as initial or new? standard is new noise scaled.
             # Flow Matching: x_t = (1-sigma)*x_0 + sigma*noise
             # Note: SD3 Scheduler sigma is 1.0(noise) -> 0.0(clean)
