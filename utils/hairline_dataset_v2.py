@@ -24,6 +24,9 @@ class HairlineDatasetV2(Dataset):
         metadata_path: Optional[str] = None,
         metadata_text_key: str = "prompt",
         resolution: int = 512,
+        aug_prob: float = 0.5,
+        aug_blur_max: float = 8.0,
+        aug_morph_max: int = 2,
     ) -> None:
         super().__init__()
         orig_dir = Path(orig_dir)
@@ -60,6 +63,10 @@ class HairlineDatasetV2(Dataset):
             )
 
         self.resolution = resolution
+        self.aug_prob = aug_prob
+        self.aug_blur_max = aug_blur_max
+        self.aug_morph_max = aug_morph_max
+
         self.image_transform = transforms.Compose(
             [
                 transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.LANCZOS),
@@ -67,12 +74,9 @@ class HairlineDatasetV2(Dataset):
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
             ]
         )
-        self.mask_transform = transforms.Compose(
-            [
-                transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.LANCZOS),
-                transforms.ToTensor(),
-            ]
-        )
+        # Note: Mask transform for augmentation is handled manually before ToTensor
+        self.mask_resize = transforms.Resize((resolution, resolution), interpolation=transforms.InterpolationMode.NEAREST)
+        self.to_tensor = transforms.ToTensor()
 
     @staticmethod
     def _load_metadata(path: Optional[str], text_key: str) -> Dict[str, str]:
@@ -130,16 +134,75 @@ class HairlineDatasetV2(Dataset):
 
     def __len__(self) -> int:
         return len(self.items)
+    
+    def _apply_augmentation(self, mask_pil: Image.Image) -> Image.Image:
+        """Apply Randomized Morphological Augmentation"""
+        import numpy as np
+        from PIL import ImageFilter
+        from scipy.ndimage import binary_erosion, binary_dilation
+        
+        # 1. Decide if we apply augmentation
+        if np.random.rand() > self.aug_prob:
+            return mask_pil
+            
+        mask_np = np.array(mask_pil) > 127 # Binary
+        
+        # 2. Random Morphology (Erosion/Dilation)
+        if self.aug_morph_max > 0:
+            # Sample iteration: e.g. -2, -1, 0, 1, 2
+            # Negative = Erosion, Positive = Dilation
+            morph_iter = np.random.randint(-self.aug_morph_max, self.aug_morph_max + 1)
+            
+            if morph_iter != 0:
+                struct = np.ones((3, 3)) # 3x3 kernel
+                if morph_iter < 0:
+                    # Erosion
+                    mask_np = binary_erosion(mask_np, structure=struct, iterations=abs(morph_iter))
+                else:
+                    # Dilation
+                    mask_np = binary_dilation(mask_np, structure=struct, iterations=morph_iter)
+        
+        # Convert back to PIL for blurring
+        # Mask is now binary boolean
+        mask_aug = Image.fromarray((mask_np * 255).astype(np.uint8))
+        
+        # 3. Random Blur
+        if self.aug_blur_max > 0.0:
+            sigma = np.random.uniform(0.0, self.aug_blur_max)
+            if sigma >= 0.5:
+                mask_aug = mask_aug.filter(ImageFilter.GaussianBlur(sigma))
+                
+                # 4. Peak Normalization (Critical for Adapter)
+                # If blur < 255 peak, stretch it back to 255
+                # But PIL GaussianBlur usually preserves total energy? No, it diffuses intensity.
+                # Peak decreases.
+                arr_blurred = np.array(mask_aug).astype(np.float32)
+                peak = arr_blurred.max()
+                if peak > 0 and peak < 255:
+                    arr_blurred = (arr_blurred / peak) * 255.0
+                    mask_aug = Image.fromarray(arr_blurred.astype(np.uint8))
+        
+        return mask_aug
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         sample = self.items[idx]
         orig_image = Image.open(sample["orig"]).convert("RGB")
         bald_image = Image.open(sample["bald"]).convert("RGB")
         mask = Image.open(sample["mask"]).convert("L")
+        
         orig_pixel_values = self.image_transform(orig_image)
         bald_pixel_values = self.image_transform(bald_image)
-        mask_tensor = self.mask_transform(mask)
-        mask_tensor = torch.clamp(mask_tensor, 0.0, 1.0)
+        
+        # Augmentation Pipeline for Mask
+        # 1. Resize first (to ensure morph/blur is resolution consistent)
+        mask_resized = self.mask_resize(mask)
+        
+        # 2. Augment (PIL based)
+        mask_augmented = self._apply_augmentation(mask_resized)
+        
+        # 3. To Tensor
+        mask_tensor_01 = self.to_tensor(mask_augmented)
+        mask_tensor_01 = torch.clamp(mask_tensor_01, 0.0, 1.0)
         
         # [V4 Dual-Stream] Create Masked Bald Image (Identity Stream Input)
         # Hair region (1.0 in mask) becomes 0.0 (Black) in masked_bald
@@ -158,13 +221,19 @@ class HairlineDatasetV2(Dataset):
         # Black is -1.
         # So Result = Original * (1 - M) + (-1) * M
         
-        masked_bald = bald_pixel_values * (1.0 - mask_tensor) + (-1.0) * mask_tensor
+        
+        masked_bald = bald_pixel_values * (1.0 - mask_tensor_01) + (-1.0) * mask_tensor_01
+        
+        # [Latent Distribution Matching]
+        # Normalize Mask to [-1, 1] for Adapter Input
+        # Current: [0, 1] -> (x - 0.5) / 0.5 = 2x - 1
+        mask_tensor_norm = (mask_tensor_01 - 0.5) / 0.5
         
         return {
             "orig_pixel_values": orig_pixel_values,
             "bald_pixel_values": bald_pixel_values,
             "masked_bald_pixel_values": masked_bald,
-            "hair_mask": mask_tensor,
+            "hair_mask": mask_tensor_norm, # Normalized Input for Adapter
             "prompt": sample["prompt"],
             "orig_path": str(sample["orig"]),
             "bald_path": str(sample["bald"]),
