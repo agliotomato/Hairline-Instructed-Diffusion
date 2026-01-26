@@ -7,3 +7,6 @@
     - [x] Inspect output image quality <!-- id: 4 -->
 - [ ] Document Experiment Logic <!-- id: 5 -->
     - [ ] Create masking_denoise_exp.md <!-- id: 6 -->
+- [x] Document Pixel-Space Compositing (Normalization) <!-- id: 7 -->
+    - [x] Update newpipeline.md with Section 5 <!-- id: 8 -->
+    - [x] Rewrite sections 2, 3, 4 in Undergrad Project tone & correct Smart Blur logic <!-- id: 9 -->
