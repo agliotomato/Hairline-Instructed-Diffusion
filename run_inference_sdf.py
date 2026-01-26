@@ -70,7 +70,7 @@ def main():
     print("Loading Adapter...")
     adapter = TinyAdapterNative(input_channels=1, base_channels=32, output_channels=16)
     # Load state dict safely
-    state_dict = torch.load(args.adapter_path, map_location=device)
+    state_dict = torch.load(args.adapter_path, map_location=device, weights_only=True)
     adapter.load_state_dict(state_dict)
     adapter.to(device, dtype=torch.bfloat16)
     adapter.eval()
@@ -82,7 +82,8 @@ def main():
     
     # Load Mask & Compute SDF
     mask_pil = Image.open(args.mask_path).convert("L").resize((1024, 1024), Image.NEAREST)
-    sdf_tensor = compute_sdf(mask_pil, tau=args.tau).unsqueeze(0).to(device).to(torch.bfloat16)
+    # Fix: ensure 4D tensor (B, C, H, W) for interpolation
+    sdf_tensor = compute_sdf(mask_pil, tau=args.tau).unsqueeze(0).unsqueeze(0).to(device).to(torch.bfloat16)
     
     # Compute Adapter Features
     with torch.no_grad():
