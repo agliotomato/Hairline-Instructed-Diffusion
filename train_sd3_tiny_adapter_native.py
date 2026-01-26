@@ -48,7 +48,7 @@ def main():
     if accelerator.is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
         print(f"Training TinyAdapterNative on {args.resolution}x{args.resolution} inputs...")
-        print(f"Augmentation: Prob={args.aug_prob}, MorphMax={args.aug_morph_max}")
+        print("Strategy: SDF Input (Tanh Normalized)")
         accelerator.init_trackers("tiny_adapter_native")
 
     # 2. Load Models
