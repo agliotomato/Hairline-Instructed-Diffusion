@@ -35,11 +35,6 @@ def main():
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     # Augmentation Args
     parser.add_argument("--aug_prob", type=float, default=0.5, help="Probability of applying augmentation")
-    parser.add_argument("--save_steps", type=int, default=500)
-    parser.add_argument("--max_grad_norm", type=float, default=1.0)
-    # Augmentation Args
-    parser.add_argument("--aug_prob", type=float, default=0.5, help="Probability of applying augmentation")
-    parser.add_argument("--aug_morph_max", type=int, default=2, help="Max iterations for random dilation/erosion")
     args = parser.parse_args()
 
     # 1. Initialize Accelerator
