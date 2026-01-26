@@ -18,8 +18,5 @@ accelerate launch train_sd3_tiny_adapter_native.py \
   --train_batch_size 2 \
   --num_train_epochs 100 \
   --learning_rate 1e-4 \
-  --aug_prob 0.3 \
-  --aug_blur_max 8.0 \
-  --aug_morph_max 2 \
   --output_dir "output/tiny_adapter_mixed_7030" \
   --mixed_precision "bf16"

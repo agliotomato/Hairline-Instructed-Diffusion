@@ -30,6 +30,7 @@ class TinyAdapterNative(nn.Module):
             
             # Processing Stage: 128 -> 128 (Deepening)
             nn.Conv2d(base_channels*4, base_channels*4, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(num_groups=32, num_channels=base_channels*4),
             nn.SiLU(),
             
             # Projection Stage: Channel mapping to Latent Space (128ch -> 16ch)

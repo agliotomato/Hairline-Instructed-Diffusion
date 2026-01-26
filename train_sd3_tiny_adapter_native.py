@@ -35,7 +35,10 @@ def main():
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     # Augmentation Args
     parser.add_argument("--aug_prob", type=float, default=0.5, help="Probability of applying augmentation")
-    parser.add_argument("--aug_blur_max", type=float, default=8.0, help="Max sigma for random blur")
+    parser.add_argument("--save_steps", type=int, default=500)
+    parser.add_argument("--max_grad_norm", type=float, default=1.0)
+    # Augmentation Args
+    parser.add_argument("--aug_prob", type=float, default=0.5, help="Probability of applying augmentation")
     parser.add_argument("--aug_morph_max", type=int, default=2, help="Max iterations for random dilation/erosion")
     args = parser.parse_args()
 
@@ -50,7 +53,7 @@ def main():
     if accelerator.is_main_process:
         os.makedirs(args.output_dir, exist_ok=True)
         print(f"Training TinyAdapterNative on {args.resolution}x{args.resolution} inputs...")
-        print(f"Augmentation: Prob={args.aug_prob}, BlurMax={args.aug_blur_max}, MorphMax={args.aug_morph_max}")
+        print(f"Augmentation: Prob={args.aug_prob}, MorphMax={args.aug_morph_max}")
         accelerator.init_trackers("tiny_adapter_native")
 
     # 2. Load Models
@@ -98,10 +101,7 @@ def main():
         orig_dir=args.orig_dir,
         bald_dir=args.bald_dir, # Required by V2 but we might only use orig/mask for simple training
         mask_dir=args.mask_dir,
-        resolution=args.resolution,
-        aug_prob=args.aug_prob,
-        aug_blur_max=args.aug_blur_max,
-        aug_morph_max=args.aug_morph_max
+        resolution=args.resolution
     )
     dataloader = DataLoader(dataset, batch_size=args.train_batch_size, shuffle=True, num_workers=4)
 

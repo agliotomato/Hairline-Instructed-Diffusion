@@ -109,3 +109,9 @@ $$ z_{t-1} = M \cdot z_{pred} + (1-M) \cdot z_{bg} $$
 | "realistic male textured crop haircut, short fringe, ash gray highlights on dark base, rough texture, slightly tousled top, modern barbershop style, cinematic lighting, ultra-detailed, 8k" | ![test1](results/0125/test1_3.png) | ![test4](results/0125/test4_3.png) | ![test6](results/0125/test6_style3_crop.png) |
 | "realistic male hairstyle, natural perm with soft waves, medium length fringe pushed slightly forward, subtle brown highlights, airy movement, fluffy texture, high detail, 8k" | ![test1](results/0125/test1_4.png) | ![test4](results/0125/test4_4.png) | ![test6](results/0125/test6_style4_perm.png) |
 | "realistic male slicked back hairstyle, blonde hair color, wet glossy texture, strong hold finish, clean sides, sharp edges, modern gentleman style, high fidelity detail, 8k" | ![test1](results/0125/test1_5.png) | ![test4](results/0125/test4_5.png) | ![test6](results/0125/test6_style5_slick.png) |
+
+### 6 향후 과제
+정량적 평가
+- Hair IoU(제어 정확도) : SegFace로 다시 세그멘테이션 해서 비교
+- CS(CLIP Score) : 텍스트 프롬프트를 얼마나 잘 따랐나?
+- Face-LPIPIS : 얼굴 보존력
