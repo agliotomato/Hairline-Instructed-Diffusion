@@ -37,6 +37,9 @@ def main():
     parser.add_argument("--save_mask_preview", action="store_true", help="Save processed hair mask preview image")
     parser.add_argument("--edge_blur_limit", type=float, default=0.8, help="Maximum blur radius for edge/detail areas (Smart Blur)")
     
+    # Adding save_intermediate argument
+    parser.add_argument("--save_intermediate", action="store_true", help="Save intermediate generation steps")
+    
     args = parser.parse_args()
     
     # Ensure dirs
@@ -270,6 +273,12 @@ def main():
     latents = init_noise.detach().clone().to(torch.bfloat16)
     noise_bg_base = init_noise.detach().clone().to(torch.bfloat16)
 
+    # Prepare dir for intermediate steps
+    if args.save_intermediate:
+        intermediate_dir = os.path.join(os.path.dirname(args.output_path), "intermediate_steps")
+        os.makedirs(intermediate_dir, exist_ok=True)
+        print(f"Saving intermediate steps to {intermediate_dir}")
+
     for i, t in enumerate(progressbar := tqdm(timesteps)):
         latent_model_input = torch.cat([latents] * 2)
         adapter_input = torch.cat([adapter_features] * 2)
@@ -299,6 +308,17 @@ def main():
             sigma_next = pipe.scheduler.sigmas[i + 1]
             latents_bg = (1 - sigma_next) * init_latents + sigma_next * noise_bg_base
             latents = latents * mask_latent + latents_bg * (1 - mask_latent)
+
+        # Save Intermediate Step
+        if args.save_intermediate:
+            with torch.no_grad():
+                # Decode intermediate latents
+                decoded = pipe.vae.decode(latents, return_dict=False)[0]
+                decoded = (decoded / 2 + 0.5).clamp(0, 1).cpu().permute(0, 2, 3, 1).float().numpy()[0]
+                decoded_pil = Image.fromarray((decoded * 255).round().astype("uint8"))
+                
+                step_filename = f"step_{i:03d}.png"
+                decoded_pil.save(os.path.join(intermediate_dir, step_filename))
             
     # Decode
     with torch.no_grad():
