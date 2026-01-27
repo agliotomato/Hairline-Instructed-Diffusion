@@ -162,8 +162,10 @@ def main():
     print("Preparing Data...")
     original_image = load_image(args.image_path)    
     
-    # Pass blur_radius if Soft Blending OR Smart Blur is enabled
-    blur = args.blur_radius if (args.soft_blending or args.smart_blur) else 0
+    # Pass blur_radius ONLY if Smart Blur is enabled. 
+    # For Soft Blending, we want strict generation (sharp mask) but soft pixel composition.
+    # So we force blur=0 here if smart_blur is False, and handle soft_blending blur in Phase 3.
+    blur = args.blur_radius if args.smart_blur else 0
     mask_highres = load_mask(args.mask_path, blur_radius=blur, dilation=args.mask_dilation, smart_blur=args.smart_blur, output_dir=os.path.dirname(args.output_path), edge_limit=args.edge_blur_limit)        
     if args.save_mask_preview:
         mask_preview = transforms.ToPILImage()(mask_highres[0].float().cpu())
@@ -331,10 +333,14 @@ def main():
     # Phase 3: Pixel Space Compositing
     # ---------------------------------------------------------
     if args.soft_blending:
-        print("Applying Pixel-Space Compositing...")
+        print(f"Applying Pixel-Space Compositing with Soft Edge (Radius={args.blur_radius})...")
         original_pil = Image.open(args.image_path).convert("RGB").resize(generated_pil.size, Image.BILINEAR)
         mask_tensor_proc = mask_highres[0].float()
         mask_pil = transforms.ToPILImage()(mask_tensor_proc)
+        
+        # Post-process mask: Apply blur ONLY for compositing
+        if args.blur_radius > 0:
+             mask_pil = mask_pil.filter(ImageFilter.GaussianBlur(args.blur_radius))
         
         if mask_pil.size != generated_pil.size:
             mask_pil = mask_pil.resize(generated_pil.size, Image.BILINEAR)
