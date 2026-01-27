@@ -10,3 +10,6 @@
 - [x] Document Pixel-Space Compositing (Normalization) <!-- id: 7 -->
     - [x] Update newpipeline.md with Section 5 <!-- id: 8 -->
     - [x] Rewrite sections 2, 3, 4 in Undergrad Project tone & correct Smart Blur logic <!-- id: 9 -->
+    - [x] Implement Smart Blur & Randomized Morphological Augmentation in training <!-- id: 10 -->
+    - [x] Implement Latent Distribution Matching (Mask Normalization [-1, 1]) <!-- id: 11 -->
+    - [x] Implement Smart Augmentation (Forehead Protection via Face Label) <!-- id: 12 -->
