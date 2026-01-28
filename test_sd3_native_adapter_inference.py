@@ -95,8 +95,10 @@ def main():
         if dilation > 0:
             hair_pil = Image.fromarray(hair_mask * 255)
             dilated_pil = hair_pil.filter(ImageFilter.MaxFilter(dilation*2 + 1))
-            dilated_np = np.array(dilated_pil) > 127
-            final_mask_np = dilated_np & (~face_mask)
+            # V3 Fix: Allow dilation to expand into the Face area (Forehead).
+            # Previous logic `& (~face_mask)` prevented hairline lowering by hard-clipping at the original hairline.
+            # We assume if the user asks for dilation, they intend to overwrite the boundary.
+            final_mask_np = np.array(dilated_pil) > 127
             mask = Image.fromarray((final_mask_np * 255).astype(np.uint8))
         else:
             mask = Image.fromarray((hair_mask * 255).astype(np.uint8))
