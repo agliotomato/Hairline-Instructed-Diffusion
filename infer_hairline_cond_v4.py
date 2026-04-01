@@ -29,7 +29,7 @@ def preprocess_image(path: str, resolution: int) -> torch.Tensor:
 
 def preprocess_conditions(mask_path: str, bald_path: str, resolution: int) -> Tuple[torch.Tensor, torch.Tensor]:
     # 1. Geometry Condition: High-Res Mask (1-channel)
-    mask = Image.open(mask_path).convert("L")
+    mask = Image.open(mask_path).convert("L")S
     mask = mask.resize((resolution, resolution), Image.NEAREST)
     mask_tensor = transforms.ToTensor()(mask).unsqueeze(0) # [1, 1, H, W]
     mask_tensor = torch.clamp(mask_tensor, 0.0, 1.0)
